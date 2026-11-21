@@ -299,6 +299,7 @@
           <div class="lang-tabs" role="tablist" aria-label="Chọn công cụ cấu hình">
             <button type="button" class="lang-tab active" data-tool="roocode" role="tab" aria-selected="true">Roo Code / Cline</button>
             <button type="button" class="lang-tab" data-tool="cursor" role="tab" aria-selected="false">Cursor</button>
+            <button type="button" class="lang-tab" data-tool="opencode" role="tab" aria-selected="false">OpenCode</button>
             <button type="button" class="lang-tab" data-tool="codex" role="tab" aria-selected="false">Codex CLI / App</button>
             <button type="button" class="lang-tab" data-tool="python" role="tab" aria-selected="false">Python</button>
             <button type="button" class="lang-tab" data-tool="node" role="tab" aria-selected="false">Node.js / TS</button>
@@ -323,6 +324,28 @@
               <li>Cuộn xuống mục <strong>OpenAI API Key</strong>: dán khóa <code>gw_...</code> của bạn.</li>
               <li>Bật công tắc <strong>Override OpenAI Base URL</strong> và nhập: <code>https://api.tiencoder.tech/v1</code>.</li>
               <li>Bấm <strong>+ Add Model</strong>, nhập chính xác ID model ở mục 3 (ví dụ <code id="cursor-model-sample">gemini-4-hydrogen-high</code>) rồi bật model đó lên.</li>
+            </ol>
+          </div>
+
+          <!-- OpenCode -->
+          <div id="panel-opencode" class="tool-panel hidden">
+            <p class="docs-lead" style="margin-bottom: 10px">
+              Tạo hoặc sửa file cấu hình <strong>OpenCode</strong> tại
+              <code>~/.config/opencode/opencode.json</code> (Windows:
+              <code>C:\Users\&lt;TenUser&gt;\.config\opencode\opencode.json</code>, hoặc đặt <code>opencode.json</code> ngay trong thư mục dự án):
+            </p>
+            <div class="code-window" style="box-shadow: none">
+              <div class="code-window-bar">
+                <div class="traffic-lights" aria-hidden="true"><span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span></div>
+                <span class="code-filename">~/.config/opencode/opencode.json</span>
+                <button type="button" class="btn btn-mint btn-sm" data-copy-target="code-opencode">Sao chép</button>
+              </div>
+              <pre class="code-body"><code id="code-opencode"></code></pre>
+            </div>
+            <ol class="step-list">
+              <li>Thay <code>gw_KEY_CUA_BAN</code> bằng khóa <code>gw_...</code> trên <a href="/console" style="color: #059669; font-weight: 700">Console</a> (hoặc dùng <code>"{env:TIENCODER_API_KEY}"</code> nếu bạn lưu key qua biến môi trường).</li>
+              <li>Chạy lệnh <code>opencode</code> trong terminal, sau đó gõ <code>/models</code> và chọn model thuộc nhóm <strong>TienCoder API</strong>.</li>
+              <li>Có thể thêm bất kỳ ID model nào ở mục 3 vào khối <code>"models"</code> trong <code>opencode.json</code>. Test nhanh 1 dòng: <code id="opencode-run-sample">opencode run --model tiencoder/gemini-3.8-flash "Xin chào!"</code></li>
             </ol>
           </div>
 

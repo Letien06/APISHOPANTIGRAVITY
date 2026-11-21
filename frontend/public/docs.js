@@ -20,15 +20,81 @@ const dom = {
   modelsTbody: document.getElementById('docs-models-tbody'),
   rooSample: document.getElementById('roocode-model-sample'),
   cursorSample: document.getElementById('cursor-model-sample'),
+  opencodeRunSample: document.getElementById('opencode-run-sample'),
+  codeOpencode: document.getElementById('code-opencode'),
   codeCodex: document.getElementById('code-codex'),
   codePython: document.getElementById('code-python'),
   codeNode: document.getElementById('code-node'),
   codeShell: document.getElementById('code-shell'),
 };
 
-function renderSnippets(primaryModel, proModel) {
+function buildOpenCodeConfig(primaryModel, proModel, items) {
+  const byId = new Map(items.map((m) => [m.id, m]));
+  const preferredOrder = [
+    proModel,
+    'gemini-4-hydrogen-high',
+    'gemini-4-hydrogen-xhigh',
+    'gemini-4-neon-high',
+    'gemini-4-argon-high',
+    primaryModel,
+    'gemini-3.8-flash',
+    'claude-opus-5-5-high',
+    'claude-sonnet-5-5-high',
+  ];
+  const selectedIds = [];
+  for (const id of preferredOrder) {
+    if (id && byId.has(id) && !selectedIds.includes(id)) {
+      selectedIds.push(id);
+    }
+  }
+  for (const m of items) {
+    if (selectedIds.length >= 6) break;
+    if (!selectedIds.includes(m.id)) selectedIds.push(m.id);
+  }
+
+  const models = {};
+  for (const id of selectedIds) {
+    const m = byId.get(id);
+    models[id] = {
+      name: id,
+      limit: {
+        context: m?.maxInputTokens ?? 65536,
+        output: m?.maxOutputTokens ?? 8192,
+      },
+    };
+  }
+
+  return JSON.stringify(
+    {
+      $schema: 'https://opencode.ai/config.json',
+      model: `tiencoder/${proModel}`,
+      small_model: `tiencoder/${primaryModel}`,
+      provider: {
+        tiencoder: {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'TienCoder API',
+          options: {
+            baseURL: BASE_URL,
+            apiKey: 'gw_KEY_CUA_BAN',
+          },
+          models,
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
+
+function renderSnippets(primaryModel, proModel, items) {
   if (dom.rooSample) dom.rooSample.textContent = primaryModel;
   if (dom.cursorSample) dom.cursorSample.textContent = proModel;
+  if (dom.opencodeRunSample) {
+    dom.opencodeRunSample.textContent = `opencode run --model tiencoder/${primaryModel} "Xin chào!"`;
+  }
+  if (dom.codeOpencode) {
+    dom.codeOpencode.textContent = buildOpenCodeConfig(primaryModel, proModel, items);
+  }
 
   dom.codeCodex.textContent = `[model_providers.tiencoder]
 name = "TienCoder API"
@@ -117,8 +183,10 @@ function renderModels(items) {
     .join('');
 
   const flash = items.find((m) => m.id.includes('3.8-flash'))?.id ?? items[0].id;
-  const flagship = items.find((m) => m.id.includes('hydrogen') || m.id.includes('opus'))?.id ?? flash;
-  renderSnippets(flash, flagship);
+  const flagship = items.find((m) => m.id.includes('hydrogen-high'))?.id
+    ?? items.find((m) => m.id.includes('hydrogen') || m.id.includes('opus'))?.id
+    ?? flash;
+  renderSnippets(flash, flagship, items);
 }
 
 async function copyText(text, btn) {
