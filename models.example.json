@@ -1,0 +1,9 @@
+[
+  {
+    "id": "ag/gemini-2.5-flash",
+    "inputMicrosPerMillion": 300000,
+    "outputMicrosPerMillion": 2500000,
+    "maxInputTokens": 32768,
+    "maxOutputTokens": 4096
+  }
+]

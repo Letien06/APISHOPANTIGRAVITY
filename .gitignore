@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+/data/
+/models.json
+/node_modules/
+*.tar.gz
+*.tgz
+*.sqlite
+*.sqlite-*
+*.db
+*.pem
+*.key
+.DS_Store
+Thumbs.db

@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Hướng dẫn cấu hình API — TienCoder API</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg?v=2" />
+    <link rel="stylesheet" href="/assets/passport.css" />
+    <style>
+      .docs-layout {
+        display: grid;
+        grid-template-columns: 230px minmax(0, 1fr);
+        gap: 24px;
+        align-items: start;
+        padding: 28px 24px 64px;
+      }
+
+      .docs-toc {
+        position: sticky;
+        top: 86px;
+        padding: 16px;
+      }
+
+      .docs-toc-title {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        font-weight: 800;
+        color: var(--ink-muted);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin: 0 0 10px;
+      }
+
+      .docs-toc nav {
+        display: grid;
+        gap: 4px;
+      }
+
+      .docs-toc a {
+        text-decoration: none;
+        color: var(--ink-2);
+        font-size: 0.88rem;
+        font-weight: 600;
+        padding: 7px 10px;
+        border-radius: 8px;
+      }
+
+      .docs-toc a:hover {
+        background: var(--mint-tint);
+        color: #065f46;
+      }
+
+      .docs-content {
+        display: grid;
+        gap: 22px;
+        min-width: 0;
+      }
+
+      .docs-h2 {
+        margin: 0 0 8px;
+        font-size: 1.3rem;
+        font-weight: 900;
+        letter-spacing: -0.02em;
+      }
+
+      .docs-lead {
+        margin: 0 0 16px;
+        color: var(--ink-2);
+        font-size: 0.94rem;
+      }
+
+      .param-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .param-box {
+        background: var(--cream);
+        border: 1.5px solid var(--ink);
+        border-radius: 12px;
+        padding: 14px;
+      }
+
+      .param-label {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        font-weight: 800;
+        color: var(--ink-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .param-value {
+        margin-top: 6px;
+        font-family: var(--font-mono);
+        font-size: 0.9rem;
+        font-weight: 800;
+        word-break: break-all;
+      }
+
+      .step-list {
+        margin: 12px 0 0;
+        padding-left: 20px;
+        display: grid;
+        gap: 8px;
+        font-size: 0.93rem;
+      }
+
+      .step-list li strong {
+        color: var(--ink);
+      }
+
+      .tool-panel {
+        margin-top: 14px;
+      }
+
+      .faq-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .faq-item {
+        border: 1.5px solid #cbd5e1;
+        border-radius: 12px;
+        padding: 14px 16px;
+        background: var(--cream);
+      }
+
+      .faq-item h3 {
+        margin: 0 0 6px;
+        font-size: 0.95rem;
+        font-family: var(--font-mono);
+        color: var(--danger-ink);
+      }
+
+      .faq-item p {
+        margin: 0;
+        font-size: 0.9rem;
+        color: var(--ink-2);
+      }
+
+      @media (max-width: 900px) {
+        .docs-layout {
+          grid-template-columns: 1fr;
+          padding: 20px 16px 48px;
+        }
+
+        .docs-toc {
+          position: static;
+        }
+
+        .param-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Chuyển tới nội dung chính</a>
+
+    <div class="edge-strip" aria-hidden="true">
+      <span class="s-purple"></span>
+      <span class="s-black"></span>
+      <span class="s-orange"></span>
+      <span class="s-yellow"></span>
+    </div>
+
+    <header class="site-nav">
+      <div class="container nav-inner">
+        <div class="nav-left">
+          <a class="brand-link" href="/">
+            <span class="mascots" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path fill="#8B5CF6" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#111418" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#F97316" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#FACC15" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#111418"/><circle cx="14.8" cy="10.5" r="1.4" fill="#111418"/></svg>
+            </span>
+            <span>TienCoder API</span>
+          </a>
+          <nav class="nav-links" aria-label="Điều hướng chính">
+            <a class="nav-link" href="/">Trang chủ</a>
+            <a class="nav-link active" href="/docs">Hướng dẫn</a>
+            <a class="nav-link" href="/usage">Tra cứu /usage</a>
+            <a class="nav-link" href="/console">Console</a>
+          </nav>
+        </div>
+
+        <div class="nav-right">
+          <div id="docs-nav-guest" class="nav-right desktop-only">
+            <a class="btn btn-outline btn-sm" href="/sign-in">Đăng nhập</a>
+            <a class="btn btn-dark btn-sm" href="/sign-up">Đăng ký</a>
+          </div>
+          <div id="docs-nav-user" class="nav-right desktop-only hidden">
+            <span id="docs-nav-username" class="badge badge-success mono"></span>
+            <a class="btn btn-dark btn-sm" href="/console">Vào Console</a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content" class="container docs-layout">
+      <aside class="passport-card-flat docs-toc" aria-label="Mục lục tài liệu">
+        <p class="docs-toc-title">Mục lục</p>
+        <nav>
+          <a href="#thong-so">1. Thông số kết nối</a>
+          <a href="#tao-khoa">2. Lấy khóa API (gw_)</a>
+          <a href="#models">3. Danh sách Model ID</a>
+          <a href="#cau-hinh">4. Cấu hình theo công cụ</a>
+          <a href="#vi-quota">5. Ví chung &amp; Tra cứu</a>
+          <a href="#loi-thuong-gap">6. Xử lý lỗi thường gặp</a>
+        </nav>
+      </aside>
+
+      <div class="docs-content">
+        <!-- 1. Quick parameters -->
+        <section id="thong-so" class="passport-card card-pad">
+          <span class="eyebrow-pill"><span class="status-dot"></span> TÀI LIỆU TÍCH HỢP · OPENAI /V1</span>
+          <h1 class="section-title" style="margin: 12px 0 8px">Hướng dẫn cấu hình TienCoder API</h1>
+          <p class="docs-lead">
+            TienCoder API hoạt động theo chuẩn <strong>OpenAI Compatible (<code>/v1</code>)</strong>, dùng chung một khóa <code>gw_...</code>
+            cho mọi model đang mở (Gemini 4 Hydrogen, Argon, 3.8 Flash, Claude Opus/Sonnet 5.5…).
+          </p>
+
+          <div class="alert alert-warning" role="note">
+            <span>
+              <strong>Lưu ý quan trọng nhất:</strong> Trong mọi app/IDE (Roo Code, Cline, Cursor, Chatbox…), luôn chọn Provider là
+              <strong>OpenAI Compatible</strong> — <strong>KHÔNG</strong> chọn Google Gemini hay Anthropic (chọn nhầm sẽ báo lỗi
+              <code>API key not valid</code> từ máy chủ Google).
+            </span>
+          </div>
+
+          <div class="param-grid">
+            <div class="param-box">
+              <div class="param-label">Provider / Giao thức</div>
+              <div class="param-value mint-text">OpenAI Compatible</div>
+              <span class="sub-line">Hỗ trợ Chat Completions &amp; Responses (SSE)</span>
+            </div>
+            <div class="param-box">
+              <div class="param-label">Base URL</div>
+              <div class="param-value">https://api.tiencoder.tech/v1</div>
+              <button type="button" class="btn btn-mint btn-sm" style="margin-top: 8px" data-copy-text="https://api.tiencoder.tech/v1">
+                Sao chép Base URL
+              </button>
+            </div>
+            <div class="param-box">
+              <div class="param-label">API Key</div>
+              <div class="param-value">gw_••••••••••••</div>
+              <a class="btn btn-outline btn-sm" style="margin-top: 8px" href="/console">Tạo / Sao chép trên Console</a>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. Create key -->
+        <section id="tao-khoa" class="passport-card card-pad">
+          <h2 class="docs-h2">2. Tạo tài khoản và lấy khóa API (<code>gw_</code>)</h2>
+          <ol class="step-list">
+            <li>Vào <a href="/sign-up" style="color: #059669; font-weight: 700">trang Đăng ký</a> tạo tài khoản miễn phí (hoặc <a href="/sign-in" style="color: #059669; font-weight: 700">Đăng nhập</a> nếu đã có).</li>
+            <li>Trong <a href="/console" style="color: #059669; font-weight: 700">Console</a>, bấm <strong>+ Tạo khóa mới</strong>, đặt tên gợi nhớ (ví dụ: <em>Roo Code máy bàn</em>, <em>Cursor laptop</em>) rồi bấm <strong>Tạo khóa</strong>.</li>
+            <li>Bấm <strong>Sao chép khóa</strong>. Bạn có thể tạo nhiều khóa khác nhau — <strong>tất cả các khóa dùng chung một ví USD của tài khoản</strong>, và có nút <strong>Sao chép</strong> ngay bên cạnh khóa trong bảng để lấy lại bất kỳ lúc nào.</li>
+          </ol>
+        </section>
+
+        <!-- 3. Live Models -->
+        <section id="models" class="passport-card card-pad">
+          <div class="toolbar">
+            <div>
+              <h2 class="docs-h2" style="margin-bottom: 4px">3. Danh sách Model ID đang hoạt động</h2>
+              <p class="docs-lead" style="margin: 0">
+                Sao chép chính xác <strong>ID Model</strong> bên dưới để điền vào trường <code>model</code> trong IDE hoặc code.
+              </p>
+            </div>
+            <span id="docs-models-count" class="badge badge-success">Đang tải...</span>
+          </div>
+
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">ID Model</th>
+                  <th scope="col">Đầu vào / 1M tok</th>
+                  <th scope="col">Đầu ra / 1M tok</th>
+                  <th scope="col">Giới hạn vào / ra</th>
+                  <th scope="col">Sao chép</th>
+                </tr>
+              </thead>
+              <tbody id="docs-models-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 4. Tool-by-tool guides -->
+        <section id="cau-hinh" class="passport-card card-pad">
+          <h2 class="docs-h2">4. Cấu hình chi tiết theo từng công cụ</h2>
+          <p class="docs-lead">Chọn công cụ bạn đang dùng để xem hướng dẫn và mẫu cấu hình sẵn.</p>
+
+          <div class="lang-tabs" role="tablist" aria-label="Chọn công cụ cấu hình">
+            <button type="button" class="lang-tab active" data-tool="roocode" role="tab" aria-selected="true">Roo Code / Cline</button>
+            <button type="button" class="lang-tab" data-tool="cursor" role="tab" aria-selected="false">Cursor</button>
+            <button type="button" class="lang-tab" data-tool="codex" role="tab" aria-selected="false">Codex CLI / App</button>
+            <button type="button" class="lang-tab" data-tool="python" role="tab" aria-selected="false">Python</button>
+            <button type="button" class="lang-tab" data-tool="node" role="tab" aria-selected="false">Node.js / TS</button>
+            <button type="button" class="lang-tab" data-tool="shell" role="tab" aria-selected="false">cURL / PowerShell</button>
+          </div>
+
+          <!-- Roo Code / Cline -->
+          <div id="panel-roocode" class="tool-panel">
+            <ol class="step-list">
+              <li>Mở cài đặt (biểu tượng bánh răng) trong <strong>Roo Code / Cline / Kilo Code</strong>.</li>
+              <li>Mục <strong>API Provider</strong>: chọn <strong><code>OpenAI Compatible</code></strong>.</li>
+              <li>Mục <strong>Base URL</strong>: nhập <code>https://api.tiencoder.tech/v1</code>.</li>
+              <li>Mục <strong>API Key</strong>: dán khóa <code>gw_...</code> từ Console.</li>
+              <li>Mục <strong>Model</strong>: nhập chính xác 1 ID ở mục 3 (ví dụ <code id="roocode-model-sample">gemini-3.8-flash</code>). Bấm <strong>Done / Save</strong> là dùng ngay!</li>
+            </ol>
+          </div>
+
+          <!-- Cursor -->
+          <div id="panel-cursor" class="tool-panel hidden">
+            <ol class="step-list">
+              <li>Mở <strong>Cursor Settings → Models</strong>.</li>
+              <li>Cuộn xuống mục <strong>OpenAI API Key</strong>: dán khóa <code>gw_...</code> của bạn.</li>
+              <li>Bật công tắc <strong>Override OpenAI Base URL</strong> và nhập: <code>https://api.tiencoder.tech/v1</code>.</li>
+              <li>Bấm <strong>+ Add Model</strong>, nhập chính xác ID model ở mục 3 (ví dụ <code id="cursor-model-sample">gemini-4-hydrogen-high</code>) rồi bật model đó lên.</li>
+            </ol>
+          </div>
+
+          <!-- Codex CLI / App -->
+          <div id="panel-codex" class="tool-panel hidden">
+            <p class="docs-lead" style="margin-bottom: 10px">
+              Mở file <code>~/.codex/config.toml</code> (Windows: <code>C:\Users\&lt;TenUser&gt;\.codex\config.toml</code>) và thêm cấu hình sau:
+            </p>
+            <div class="code-window" style="box-shadow: none">
+              <div class="code-window-bar">
+                <div class="traffic-lights" aria-hidden="true"><span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span></div>
+                <span class="code-filename">~/.codex/config.toml</span>
+                <button type="button" class="btn btn-mint btn-sm" data-copy-target="code-codex">Sao chép</button>
+              </div>
+              <pre class="code-body"><code id="code-codex"></code></pre>
+            </div>
+            <p class="field-hint" style="margin-top: 10px">
+              Sau đó đặt biến môi trường rồi chạy: <code>$env:TIENCODER_API_KEY="gw_KEY_CUA_BAN"; codex -p tiencoder</code> (PowerShell) hoặc
+              <code>export TIENCODER_API_KEY="gw_KEY_CUA_BAN" &amp;&amp; codex -p tiencoder</code> (macOS/Linux).
+            </p>
+          </div>
+
+          <!-- Python -->
+          <div id="panel-python" class="tool-panel hidden">
+            <p class="docs-lead" style="margin-bottom: 10px">Cài đặt thư viện chính thức: <code>pip install openai</code></p>
+            <div class="code-window" style="box-shadow: none">
+              <div class="code-window-bar">
+                <div class="traffic-lights" aria-hidden="true"><span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span></div>
+                <span class="code-filename">main.py</span>
+                <button type="button" class="btn btn-mint btn-sm" data-copy-target="code-python">Sao chép</button>
+              </div>
+              <pre class="code-body"><code id="code-python"></code></pre>
+            </div>
+          </div>
+
+          <!-- Node.js -->
+          <div id="panel-node" class="tool-panel hidden">
+            <p class="docs-lead" style="margin-bottom: 10px">Cài đặt thư viện chính thức: <code>npm install openai</code></p>
+            <div class="code-window" style="box-shadow: none">
+              <div class="code-window-bar">
+                <div class="traffic-lights" aria-hidden="true"><span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span></div>
+                <span class="code-filename">index.mjs</span>
+                <button type="button" class="btn btn-mint btn-sm" data-copy-target="code-node">Sao chép</button>
+              </div>
+              <pre class="code-body"><code id="code-node"></code></pre>
+            </div>
+          </div>
+
+          <!-- cURL / PowerShell -->
+          <div id="panel-shell" class="tool-panel hidden">
+            <p class="docs-lead" style="margin-bottom: 10px">Test nhanh kết nối trực tiếp không cần cài thư viện:</p>
+            <div class="code-window" style="box-shadow: none">
+              <div class="code-window-bar">
+                <div class="traffic-lights" aria-hidden="true"><span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span></div>
+                <span class="code-filename">curl &amp; PowerShell</span>
+                <button type="button" class="btn btn-mint btn-sm" data-copy-target="code-shell">Sao chép</button>
+              </div>
+              <pre class="code-body"><code id="code-shell"></code></pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. Wallet & Usage -->
+        <section id="vi-quota" class="passport-card card-pad">
+          <h2 class="docs-h2">5. Cơ chế ví chung, tính phí &amp; theo dõi trực tiếp</h2>
+          <ul class="check-list" style="margin-top: 10px">
+            <li><span class="check-icon">✓</span> <strong>Ví chung tài khoản:</strong> Mọi khóa <code>gw_</code> bạn tạo đều dùng chung một số dư USD của tài khoản chính — khóa nào gửi request thì trừ vào ví chung.</li>
+            <li><span class="check-icon">✓</span> <strong>Tính phí theo token thật:</strong> Hệ thống giữ chỗ trước khi gọi model, sau khi phản hồi xong sẽ chốt trừ đúng theo số token đầu vào &amp; đầu ra thực tế (đơn vị USD, chính xác tới <code>$0.000001</code>).</li>
+            <li><span class="check-icon">✓</span> <strong>Cập nhật trực tiếp (Live 3s):</strong> Mở <a href="/console" style="color: #059669; font-weight: 700">Console</a> hoặc <a href="/usage" style="color: #059669; font-weight: 700">Tra cứu /usage</a> để xem từng request nhảy lên theo thời gian thực (Giờ Việt Nam UTC+7).</li>
+            <li><span class="check-icon">✓</span> <strong>Không lưu nội dung prompt:</strong> Gateway chỉ lưu thời gian, model, mã HTTP, số token và chi phí để đối soát.</li>
+          </ul>
+        </section>
+
+        <!-- 6. Troubleshooting -->
+        <section id="loi-thuong-gap" class="passport-card card-pad">
+          <h2 class="docs-h2">6. Xử lý các lỗi thường gặp</h2>
+          <div class="faq-list">
+            <article class="faq-item">
+              <h3>API key not valid. Please pass a valid API key.</h3>
+              <p>Bạn đang chọn nhầm Provider là <strong>Google Gemini</strong> trong IDE/app. Hãy đổi Provider sang <strong>OpenAI Compatible</strong> và đặt Base URL là <code>https://api.tiencoder.tech/v1</code>.</p>
+            </article>
+            <article class="faq-item">
+              <h3>404 model_not_found</h3>
+              <p>Tên model gửi lên chưa khớp với danh sách đang mở. Hãy sao chép chính xác ID model ở <a href="#models" style="color: #059669; font-weight: 700">Mục 3</a> (lưu ý không thêm tiền tố <code>ag/</code>).</p>
+            </article>
+            <article class="faq-item">
+              <h3>401 invalid_key / key_disabled / key_expired</h3>
+              <p>Khóa bị thiếu/sai ký tự, đã bị vô hiệu hóa hoặc đã hết hạn. Vào <a href="/console" style="color: #059669; font-weight: 700">Console</a> kiểm tra trạng thái khóa và bấm nút <strong>Sao chép</strong> để dán lại.</p>
+            </article>
+            <article class="faq-item">
+              <h3>429 quota_exceeded</h3>
+              <p>Số dư còn lại trong ví tài khoản không đủ mức giữ chỗ cho lượt gọi này. Hãy kiểm tra số dư trên <a href="/console" style="color: #059669; font-weight: 700">Console</a>, thử model tiết kiệm hơn (như <code>gemini-3.8-flash</code>) hoặc liên hệ quản trị viên để nạp thêm ví.</p>
+            </article>
+            <article class="faq-item">
+              <h3>403 model_forbidden</h3>
+              <p>Khóa này đang bị giới hạn danh sách model được phép gọi. Vào <a href="/console" style="color: #059669; font-weight: 700">Console</a> → bấm <strong>Sửa</strong> trên khóa → chọn <strong>Tất cả model được cấu hình</strong>.</p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <span><strong>TienCoder API</strong> · Tài liệu tích hợp chuẩn OpenAI /v1</span>
+        <span class="mono" style="font-size: 0.82rem"><span class="status-dot"></span> https://api.tiencoder.tech/v1</span>
+      </div>
+    </footer>
+
+    <script type="module" src="/assets/docs.js"></script>
+  </body>
+</html>

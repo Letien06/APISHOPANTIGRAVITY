@@ -1,0 +1,82 @@
+/* Public /usage page shares the unified Model Passport design system */
+@import url('/usage/assets/passport.css');
+
+.account-keys-panel {
+  background: var(--cream);
+  border: 1.5px solid var(--ink);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.account-key-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-key-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 11px;
+  border: 1.5px solid #cbd5e1;
+  background: #ffffff;
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.account-key-pill:hover {
+  border-color: var(--ink);
+  background: #f8fafc;
+}
+
+.account-key-pill.active {
+  background: var(--mint-tint);
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.account-key-pill .pill-prefix {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.account-key-pill .pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: #10b981;
+}
+
+.account-key-pill .pill-dot.warn {
+  background: #f59e0b;
+}
+
+.account-key-pill .pill-dot.off {
+  background: #ef4444;
+}
+
+.usage-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+
+.usage-divider::before,
+.usage-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1.5px dashed #cbd5e1;
+}

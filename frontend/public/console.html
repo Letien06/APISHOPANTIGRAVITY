@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Console quản lý khóa — TienCoder API</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg?v=2" />
+    <link rel="stylesheet" href="/assets/passport.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Chuyển tới nội dung chính</a>
+
+    <div class="edge-strip" aria-hidden="true">
+      <span class="s-purple"></span>
+      <span class="s-black"></span>
+      <span class="s-orange"></span>
+      <span class="s-yellow"></span>
+    </div>
+
+    <header class="site-nav">
+      <div class="container nav-inner">
+        <div class="nav-left">
+          <a class="brand-link" href="/">
+            <span class="mascots" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path fill="#8B5CF6" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#111418" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#F97316" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#FACC15" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#111418"/><circle cx="14.8" cy="10.5" r="1.4" fill="#111418"/></svg>
+            </span>
+            <span>TienCoder API</span>
+          </a>
+          <nav class="nav-links" aria-label="Điều hướng chính">
+            <a class="nav-link" href="/">Trang chủ</a>
+            <a class="nav-link" href="/docs">Hướng dẫn</a>
+            <a class="nav-link" href="/usage">Tra cứu /usage</a>
+            <a class="nav-link active" href="/console">Console</a>
+          </nav>
+        </div>
+
+        <div class="nav-right">
+          <span class="badge badge-neutral desktop-only">Giờ Việt Nam (UTC+7)</span>
+          <span id="header-user-badge" class="badge badge-success mono hidden"></span>
+          <button id="logout-btn" type="button" class="btn btn-danger-outline btn-sm">Đăng xuất</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content" class="container" style="padding: 26px 24px 60px">
+      <div id="live-status" class="sr-only" role="status" aria-live="polite"></div>
+
+      <div id="console-loading" class="loading-banner" role="status">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>Đang tải hộ chiếu và danh sách khóa của bạn...</span>
+      </div>
+
+      <div id="console-body" class="hidden">
+        <div id="console-feedback" class="alert hidden" role="status" aria-live="polite"></div>
+
+        <!-- Account Passport Overview -->
+        <section class="passport-card card-pad section-gap" aria-labelledby="account-heading">
+          <div class="toolbar" style="margin-bottom: 10px">
+            <div>
+              <span class="eyebrow-pill"><span class="status-dot"></span> HỘ CHIẾU TÀI KHOẢN</span>
+              <h1 id="account-heading" class="section-title" style="margin-top: 8px; font-size: 1.45rem">Xin chào</h1>
+              <span id="account-email" class="sub-line mono"></span>
+            </div>
+            <div class="base-url-bar" style="box-shadow: none; margin: 0">
+              <span class="base-url-label">BASE URL</span>
+              <code class="base-url-code">https://api.tiencoder.tech/v1</code>
+              <button id="console-copy-url" type="button" class="btn btn-mint btn-sm">Sao chép</button>
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Tổng hạn mức ví</div>
+              <div class="kpi-value" id="acc-quota">$0.00</div>
+              <span class="sub-line">Tất cả khóa dùng chung ví tài khoản</span>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Đã dùng</div>
+              <div class="kpi-value" id="acc-used">$0.00</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Đang giữ chỗ</div>
+              <div class="kpi-value" id="acc-reserved">$0.00</div>
+            </div>
+            <div class="kpi-card kpi-highlight">
+              <div class="kpi-label">Số dư còn lại</div>
+              <div class="kpi-value" id="acc-remaining">$0.00</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- My API Keys -->
+        <section class="passport-card card-pad section-gap" aria-labelledby="my-keys-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="my-keys-heading">Khóa API của bạn</h2>
+              <span id="keys-limit-note" class="sub-line"></span>
+            </div>
+            <div class="toolbar-actions">
+              <button id="console-live-toggle" type="button" class="btn btn-outline btn-sm live-toggle-btn" aria-pressed="true" title="Tự động cập nhật mỗi 3 giây">
+                <span class="live-dot-pulse" aria-hidden="true"></span>
+                <span>Trực tiếp</span>
+              </button>
+              <button id="refresh-console-btn" type="button" class="btn btn-outline btn-sm">Làm mới</button>
+              <button id="open-create-btn" type="button" class="btn btn-dark btn-sm">
+                <span>+ Tạo khóa mới</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="keys-empty" class="empty-state hidden">
+            <h3>Bạn chưa có khóa API nào</h3>
+            <p>Bấm <strong>+ Tạo khóa mới</strong> để cấp khóa <code>gw_...</code> dùng với Cursor, Cline hoặc OpenAI SDK.</p>
+          </div>
+
+          <div id="keys-table-wrap" class="table-scroll hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Tên &amp; Khóa API</th>
+                  <th scope="col">Trạng thái</th>
+                  <th scope="col">Chi tiêu (khóa này)</th>
+                  <th scope="col">Request</th>
+                  <th scope="col">Hạn dùng (UTC+7)</th>
+                  <th scope="col">Model</th>
+                  <th scope="col">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody id="keys-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Selected Key History -->
+        <section id="detail-section" class="passport-card card-pad section-gap hidden" aria-labelledby="detail-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="detail-heading">Lịch sử yêu cầu</h2>
+              <span id="detail-prefix" class="sub-line mono"></span>
+            </div>
+            <div class="toolbar-actions">
+              <span id="detail-history-count" class="badge badge-neutral">0 mục</span>
+              <button id="detail-close-btn" type="button" class="btn btn-outline btn-sm">Đóng</button>
+            </div>
+          </div>
+
+          <div id="detail-empty" class="empty-state hidden">
+            <p>Khóa này chưa có lượt gọi nào.</p>
+          </div>
+
+          <div id="detail-table-wrap" class="table-scroll hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Thời điểm (UTC+7)</th>
+                  <th scope="col">Model &amp; Endpoint</th>
+                  <th scope="col">Trạng thái</th>
+                  <th scope="col">Đầu vào</th>
+                  <th scope="col">Đầu ra</th>
+                  <th scope="col">Tổng trừ vào hạn mức</th>
+                </tr>
+              </thead>
+              <tbody id="detail-tbody"></tbody>
+            </table>
+          </div>
+
+          <div id="detail-load-more-wrap" class="load-more-wrap hidden">
+            <button id="detail-load-more-btn" type="button" class="btn btn-outline btn-sm">Tải thêm</button>
+          </div>
+        </section>
+
+        <!-- Model Catalog -->
+        <section class="passport-card card-pad section-gap" aria-labelledby="models-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="models-heading">Danh mục model hiện có</h2>
+              <span class="sub-line">Giá USD trên mỗi 1.000.000 token (1 USD = 1.000.000 micros)</span>
+            </div>
+            <span id="models-count" class="badge badge-neutral">0 model</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">ID Model</th>
+                  <th scope="col">Giá đầu vào / 1M</th>
+                  <th scope="col">Giá đầu ra / 1M</th>
+                  <th scope="col">Max Input</th>
+                  <th scope="col">Max Output</th>
+                  <th scope="col">Sao chép</th>
+                </tr>
+              </thead>
+              <tbody id="models-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Create / Edit Key Modal -->
+    <dialog id="key-modal" class="modal" aria-labelledby="key-modal-title">
+      <form id="key-modal-form" novalidate>
+        <div class="modal-header">
+          <h3 id="key-modal-title">Tạo khóa API mới</h3>
+          <button type="button" class="btn btn-outline btn-sm" id="key-modal-close-x">Đóng</button>
+        </div>
+        <div class="modal-body">
+          <div id="key-modal-error" class="alert alert-danger hidden" role="alert"></div>
+
+          <div class="field">
+            <label class="field-label" for="key-name-input">Tên khóa (1–100 ký tự)</label>
+            <input id="key-name-input" class="text-input" type="text" maxlength="100" placeholder="Ví dụ: Cursor laptop" required />
+            <p class="field-hint">Khóa mới sẽ tự động dùng chung số dư ví tài khoản của bạn.</p>
+          </div>
+
+          <fieldset class="fieldset-clean">
+            <legend>Hạn dùng — Giờ Việt Nam (UTC+7)</legend>
+            <label class="checkbox-row">
+              <input id="key-no-expiry" type="checkbox" checked />
+              <span>Không đặt hạn dùng</span>
+            </label>
+            <div id="key-expiry-wrap" class="field hidden" style="margin-top: 8px; margin-bottom: 0">
+              <label class="field-label" for="key-expiry-input">Hết hạn lúc (Giờ Việt Nam — UTC+7)</label>
+              <input id="key-expiry-input" class="text-input" type="datetime-local" />
+            </div>
+          </fieldset>
+
+          <fieldset class="fieldset-clean">
+            <legend>Quyền sử dụng model</legend>
+            <label class="radio-row">
+              <input type="radio" name="modelScope" value="all" checked />
+              <span>Tất cả model được cấu hình</span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="modelScope" value="custom" />
+              <span>Chọn model cụ thể</span>
+            </label>
+            <div id="key-model-checklist" class="model-checklist hidden"></div>
+          </fieldset>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline btn-sm" id="key-modal-cancel">Hủy</button>
+          <button type="submit" class="btn btn-dark btn-sm" id="key-modal-submit">Tạo khóa</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- One-Time Key Reveal Modal -->
+    <dialog id="reveal-modal" class="modal" aria-labelledby="reveal-modal-title">
+      <div class="modal-header">
+        <h3 id="reveal-modal-title">Khóa API mới đã sẵn sàng</h3>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-warning" role="alert">
+          <strong>Lưu khóa ngay bây giờ!</strong> Đây là lần duy nhất khóa đầy đủ hiển thị. Khi đóng hộp thoại, giá trị khóa sẽ bị xóa khỏi màn hình.
+        </div>
+        <div class="field-label">Tên khóa: <span id="reveal-key-name"></span></div>
+        <div id="reveal-key-value" class="secret-reveal-box" tabindex="0"></div>
+        <div class="toolbar-actions">
+          <button id="copy-revealed-btn" type="button" class="btn btn-mint btn-sm">Sao chép khóa</button>
+          <span id="copy-feedback" class="field-hint" role="status" aria-live="polite"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="close-reveal-btn" type="button" class="btn btn-dark btn-sm">Tôi đã lưu — Đóng</button>
+      </div>
+    </dialog>
+
+    <!-- Confirm Disable Modal -->
+    <dialog id="disable-modal" class="modal" aria-labelledby="disable-modal-title">
+      <div class="modal-header">
+        <h3 id="disable-modal-title">Xác nhận vô hiệu hóa khóa</h3>
+      </div>
+      <div class="modal-body">
+        <p id="disable-modal-message"></p>
+        <p class="field-hint">Khóa sẽ ngừng hoạt động ngay lập tức. Lịch sử sử dụng vẫn được lưu và bạn có thể bật lại sau.</p>
+      </div>
+      <div class="modal-footer">
+        <button id="disable-cancel-btn" type="button" class="btn btn-outline btn-sm">Hủy</button>
+        <button id="disable-confirm-btn" type="button" class="btn btn-danger btn-sm">Vô hiệu hóa</button>
+      </div>
+    </dialog>
+
+    <script type="module" src="/assets/console.js"></script>
+  </body>
+</html>

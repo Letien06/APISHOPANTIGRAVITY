@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>TienCoder API — Một khóa cho toàn bộ dòng Google Gemini</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg?v=2" />
+    <link rel="stylesheet" href="/assets/passport.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Chuyển tới nội dung chính</a>
+
+    <div class="edge-strip" aria-hidden="true">
+      <span class="s-purple"></span>
+      <span class="s-black"></span>
+      <span class="s-orange"></span>
+      <span class="s-yellow"></span>
+    </div>
+
+    <header class="site-nav">
+      <div class="container nav-inner">
+        <div class="nav-left">
+          <a class="brand-link" href="/">
+            <span class="mascots" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path fill="#8B5CF6" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#111418" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#F97316" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#FACC15" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#111418"/><circle cx="14.8" cy="10.5" r="1.4" fill="#111418"/></svg>
+            </span>
+            <span>TienCoder API</span>
+          </a>
+          <nav class="nav-links" aria-label="Điều hướng chính">
+            <a class="nav-link active" href="#top">Trang chủ</a>
+            <a class="nav-link" href="/docs">Hướng dẫn</a>
+            <a class="nav-link" href="#models" id="nav-models-link">Models</a>
+            <a class="nav-link" href="/usage">Tra cứu /usage</a>
+            <a class="nav-link" href="/console" id="nav-console-link">Console</a>
+          </nav>
+        </div>
+
+        <div class="nav-right">
+          <div id="nav-auth-guest" class="nav-right desktop-only">
+            <a class="btn btn-outline btn-sm" href="/sign-in">Đăng nhập</a>
+            <a class="btn btn-dark btn-sm" href="/sign-up">Đăng ký</a>
+          </div>
+          <div id="nav-auth-user" class="nav-right desktop-only hidden">
+            <span id="nav-username" class="badge badge-success mono"></span>
+            <a class="btn btn-dark btn-sm" href="/console">Vào Console</a>
+          </div>
+          <button id="mobile-menu-btn" class="mobile-menu-btn" type="button" aria-label="Mở menu" aria-expanded="false">☰</button>
+        </div>
+      </div>
+
+      <div id="mobile-drawer" class="mobile-drawer" aria-label="Menu di động">
+        <a class="nav-link active" href="#top">Trang chủ</a>
+        <a class="nav-link" href="/docs">Hướng dẫn</a>
+        <a class="nav-link" href="#quick-start">Bắt đầu nhanh</a>
+        <a class="nav-link" href="/usage">Tra cứu /usage</a>
+        <a class="nav-link" href="/console">Console</a>
+        <a class="btn btn-outline btn-sm" href="/sign-in">Đăng nhập</a>
+        <a class="btn btn-dark btn-sm" href="/sign-up">Đăng ký miễn phí</a>
+      </div>
+    </header>
+
+    <div class="marquee-band" aria-hidden="true">
+      <div class="marquee-track">
+        <span class="marquee-item"><span class="marquee-dot"></span> CHUYÊN GOOGLE GEMINI</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> TƯƠNG THÍCH CURSOR / CLINE / OPENAI SDK</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> CHUẨN OPENAI /V1</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> MỘT KHÓA, FULL MODEL GEMINI</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> TÍNH PHÍ MINH BẠCH THEO TOKEN</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> KHÔNG LƯU NỘI DUNG PROMPT</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> CHUYÊN GOOGLE GEMINI</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> TƯƠNG THÍCH CURSOR / CLINE / OPENAI SDK</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> CHUẨN OPENAI /V1</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> MỘT KHÓA, FULL MODEL GEMINI</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> TÍNH PHÍ MINH BẠCH THEO TOKEN</span>
+        <span class="marquee-item"><span class="marquee-dot"></span> KHÔNG LƯU NỘI DUNG PROMPT</span>
+      </div>
+    </div>
+
+    <main id="main-content">
+      <section id="top" class="hero-section">
+        <div class="container hero-grid">
+          <div>
+            <span class="eyebrow-pill"><span class="status-dot"></span> OPENAI COMPATIBLE · /V1 READY</span>
+            <h1 class="hero-title">
+              TienCoder API: một khóa<br />
+              <span class="mint-text">chuyên dòng Google Gemini</span>
+            </h1>
+            <p class="hero-sub">
+              Chuyên cung cấp trọn bộ model Google Gemini (Gemini 4, Gemini 3.8 Flash, Gemini 3.1 Pro…) qua chuẩn OpenAI <code>/v1</code> —
+              quản lý hạn mức USD rõ ràng, theo dõi từng token đầu vào/đầu ra và không lưu nội dung prompt.
+            </p>
+            <div class="hero-ctas">
+              <a class="btn btn-dark" href="/sign-up" id="hero-primary-cta">
+                <span>Lấy hộ chiếu API</span>
+                <span class="arrow-circle" aria-hidden="true">→</span>
+              </a>
+              <button id="open-lines-modal-btn" type="button" class="btn btn-outline">
+                Xem danh sách model
+              </button>
+            </div>
+            <div class="base-url-bar">
+              <span class="base-url-label">BASE URL</span>
+              <code class="base-url-code" id="hero-base-url">https://api.tiencoder.tech/v1</code>
+              <button id="copy-base-url-btn" type="button" class="btn btn-mint btn-sm">Sao chép</button>
+            </div>
+          </div>
+
+          <div class="ticket-card" aria-label="Hộ chiếu model tương tác">
+            <div class="ticket-main">
+              <div class="ticket-head">
+                <div>
+                  <h2 class="ticket-title">Model passport</h2>
+                  <div class="ticket-sub">MODEL PASSPORT · /V1 ACCESS</div>
+                </div>
+                <span class="badge badge-success"><span class="status-dot"></span> <span id="ticket-health-text">Tuyến ổn định</span></span>
+              </div>
+
+              <div id="passport-model-tabs" class="model-tabs" role="tablist" aria-label="Chọn model xem tuyến"></div>
+
+              <div class="route-flow">
+                <div class="route-node">
+                  <span><strong>App / IDE của bạn</strong> (Cursor, Cline, SDK)</span>
+                  <span class="route-tag">CLIENT</span>
+                </div>
+                <div class="route-arrow" aria-hidden="true">↓</div>
+                <div class="route-node">
+                  <span class="mono"><strong>api.tiencoder.tech/v1</strong></span>
+                  <span class="route-tag">/V1</span>
+                </div>
+                <div class="route-arrow" aria-hidden="true">↓</div>
+                <div class="route-node highlight">
+                  <span class="mono"><strong id="ticket-selected-model">ag/gemini-3.8-flash</strong></span>
+                  <span class="route-tag">READY</span>
+                </div>
+              </div>
+
+              <div class="ticket-meta-row num">
+                <span id="ticket-model-price">Đầu vào: $0.30/1M · Đầu ra: $2.50/1M</span>
+                <span id="ticket-model-limits">Max out: 4.096 tok</span>
+              </div>
+
+              <div class="stamp" aria-hidden="true">
+                <span>OPENAI</span>
+                <span>COMPATIBLE</span>
+                <span>VERIFIED</span>
+              </div>
+            </div>
+
+            <div class="ticket-stub" aria-hidden="true">
+              <div class="mascots">
+                <svg viewBox="0 0 24 24"><path fill="#8B5CF6" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+                <svg viewBox="0 0 24 24"><path fill="#111418" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+                <svg viewBox="0 0 24 24"><path fill="#F97316" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+                <svg viewBox="0 0 24 24"><path fill="#FACC15" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+              </div>
+              <svg width="72" height="58" viewBox="0 0 72 58" role="img" aria-label="Barcode">
+                <rect x="2" y="4" width="3" height="50" fill="#111418"/>
+                <rect x="8" y="4" width="1.5" height="50" fill="#111418"/>
+                <rect x="12" y="4" width="4" height="50" fill="#111418"/>
+                <rect x="19" y="4" width="2" height="50" fill="#111418"/>
+                <rect x="24" y="4" width="5" height="50" fill="#111418"/>
+                <rect x="32" y="4" width="2" height="50" fill="#111418"/>
+                <rect x="37" y="4" width="3" height="50" fill="#111418"/>
+                <rect x="43" y="4" width="1.5" height="50" fill="#111418"/>
+                <rect x="47" y="4" width="4" height="50" fill="#111418"/>
+                <rect x="54" y="4" width="2" height="50" fill="#111418"/>
+                <rect x="59" y="4" width="4.5" height="50" fill="#111418"/>
+                <rect x="66" y="4" width="3" height="50" fill="#111418"/>
+              </svg>
+              <div>
+                <div class="stub-serial">PASS-2026-V1</div>
+                <div class="stub-serial" style="color: #64748b">ADMIT ONE</div>
+                <div class="stub-serial">NO. 0001</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-band">
+        <div class="container">
+          <div class="section-header-row">
+            <div>
+              <div class="eyebrow-text">TẠI SAO CHỌN GATEWAY NÀY</div>
+              <h2 class="section-title">Một cửa ngõ cho toàn bộ luồng AI</h2>
+            </div>
+            <p class="section-aside">Một SDK, một khóa API, một bảng đối soát rõ ràng.</p>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature-card">
+              <div class="feature-card-top">
+                <span class="feature-dot-label"><span class="dot dot-mint"></span> Models</span>
+                <span class="tag-pill">MODEL</span>
+              </div>
+              <h3>Một khóa, nhiều model</h3>
+              <p>Chuyển đổi linh hoạt giữa các model đã cấu hình trên 9Router mà không cần đổi SDK hay cấu trúc code.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-card-top">
+                <span class="feature-dot-label"><span class="dot dot-yellow"></span> Hạn mức</span>
+                <span class="tag-pill">QUOTA</span>
+              </div>
+              <h3>Giữ chỗ nguyên tử</h3>
+              <p>Nhiều request song song dùng chung đúng hạn mức USD, ghi rõ chi phí đầu vào/đầu ra đến từng micro.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-card-top">
+                <span class="feature-dot-label"><span class="dot dot-blue"></span> Giao thức</span>
+                <span class="tag-pill">/V1</span>
+              </div>
+              <h3>Drop-in OpenAI</h3>
+              <p>Hỗ trợ Chat Completions và Responses API kèm SSE streaming — hoạt động ngay với Cursor, Cline, OpenAI SDK.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-card-top">
+                <span class="feature-dot-label"><span class="dot dot-orange"></span> Riêng tư</span>
+                <span class="tag-pill">SAFE</span>
+              </div>
+              <h3>Không lưu prompt</h3>
+              <p>Gateway chỉ ghi nhận số lượng token, trạng thái HTTP và chi phí để đối soát — không lưu nội dung trò chuyện.</p>
+            </article>
+          </div>
+
+          <div class="live-bar" aria-label="Danh sách model đang sẵn sàng">
+            <span class="live-bar-title"><span class="status-dot"></span> TUYẾN MODEL SẴN SÀNG</span>
+            <div id="live-line-chips" class="badge-stack"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="models" class="section-band">
+        <div class="container">
+          <div class="section-header-row">
+            <div>
+              <div class="eyebrow-text">DANH SÁCH MODEL GOOGLE GEMINI</div>
+              <h2 class="section-title">Toàn bộ model đang mở cho khóa API</h2>
+            </div>
+            <p class="section-aside" id="models-catalog-summary">Bấm nút <strong>Sao chép ID</strong> để dán thẳng vào Cursor, Cline hoặc OpenAI SDK.</p>
+          </div>
+
+          <div class="passport-card card-pad">
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">ID Model (dùng khi gọi API)</th>
+                    <th scope="col">Giá đầu vào / 1M</th>
+                    <th scope="col">Giá đầu ra / 1M</th>
+                    <th scope="col">Max Input / Output</th>
+                    <th scope="col">Sao chép</th>
+                  </tr>
+                </thead>
+                <tbody id="landing-models-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="quick-start" class="section-band white-band">
+        <div class="container quickstart-grid">
+          <div>
+            <span class="eyebrow-pill"><span class="status-dot"></span> Cài đặt trong 1 phút</span>
+            <h2 class="section-title" style="margin-top: 14px">
+              Dùng được OpenAI là dùng được TienCoder API.
+            </h2>
+            <p class="section-aside" style="margin-top: 10px">
+              Chỉ cần thay <code>base_url</code> sang <code>https://api.tiencoder.tech/v1</code> và điền khóa <code>gw_...</code>
+              của bạn. Không cần cài thêm thư viện riêng.
+            </p>
+
+            <div class="lang-tabs" role="tablist" aria-label="Chọn ngôn ngữ lập trình">
+              <button type="button" class="lang-tab active" data-lang="python" role="tab" aria-selected="true">Python</button>
+              <button type="button" class="lang-tab" data-lang="curl" role="tab" aria-selected="false">cURL</button>
+              <button type="button" class="lang-tab" data-lang="js" role="tab" aria-selected="false">JS / TS</button>
+              <button type="button" class="lang-tab" data-lang="go" role="tab" aria-selected="false">Go</button>
+              <button type="button" class="lang-tab" data-lang="rust" role="tab" aria-selected="false">Rust</button>
+            </div>
+
+            <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px">
+              <a class="btn btn-dark" href="/sign-up">
+                <span>Tạo khóa API ngay</span>
+                <span class="arrow-circle" aria-hidden="true">→</span>
+              </a>
+              <a class="btn btn-outline" href="/usage">Tra cứu khóa gw_</a>
+            </div>
+          </div>
+
+          <div>
+            <div class="code-window">
+              <div class="code-window-bar">
+                <div class="traffic-lights" aria-hidden="true">
+                  <span class="tl-red"></span>
+                  <span class="tl-yellow"></span>
+                  <span class="tl-green"></span>
+                </div>
+                <span class="code-filename" id="code-filename">quick-start.py · api.tiencoder.tech/v1</span>
+                <button id="copy-code-btn" type="button" class="btn btn-mint btn-sm">Sao chép</button>
+              </div>
+              <pre class="code-body"><code id="code-snippet"></code></pre>
+              <div class="code-footer">
+                <button id="simulate-btn" type="button" class="btn btn-outline btn-sm" style="background: #161a20; color: #6ee7b7; border-color: #10b981">
+                  ▶ Mô phỏng phản hồi (Run test)
+                </button>
+                <span class="mono" style="font-size: 0.74rem; color: #94a3b8">● GATEWAY · AUTO ROUTING</span>
+              </div>
+              <pre id="sim-output" class="sim-output hidden"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-band dark-band">
+        <div class="container">
+          <div class="section-header-row">
+            <div>
+              <div class="eyebrow-text">MODEL PASSPORT FOR VIBE CODING</div>
+              <h2 class="section-title" style="color: #ffffff">Ba bước để kết nối</h2>
+            </div>
+            <p class="section-aside">Từ lúc đăng ký tài khoản tới request streaming đầu tiên.</p>
+          </div>
+
+          <div class="steps-grid">
+            <article class="step-card">
+              <div class="step-num">01</div>
+              <h3>Đăng ký &amp; tạo khóa <code>gw_</code></h3>
+              <p>Tạo tài khoản miễn phí, vào Console và cấp khóa API riêng với hạn mức USD và quyền model bạn muốn.</p>
+            </article>
+            <article class="step-card">
+              <div class="step-num">02</div>
+              <h3>Đổi Base URL sang <code>/v1</code></h3>
+              <p>Dán <code>https://api.tiencoder.tech/v1</code> và khóa <code>gw_...</code> vào Cursor, Cline, Windsurf hoặc OpenAI SDK.</p>
+            </article>
+            <article class="step-card">
+              <div class="step-num">03</div>
+              <h3>Gửi request &amp; theo dõi usage</h3>
+              <p>Mọi lượt gọi được ghi nhận token vào/ra và chi phí theo Giờ Việt Nam (UTC+7) trên Console hoặc trang <code>/usage</code>.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-band">
+        <div class="container">
+          <div class="passport-card cta-banner">
+            <div>
+              <h2>Nhận hộ chiếu API ngay hôm nay</h2>
+              <p>
+                Dùng được ngay sau khi đăng ký. Quản lý khóa trực tiếp trên Console, theo dõi từng token và kiểm soát hạn mức dễ dàng.
+              </p>
+            </div>
+            <a class="btn btn-dark" href="/sign-up">
+              <span>Đăng ký miễn phí</span>
+              <span class="arrow-circle" aria-hidden="true">→</span>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div class="brand-link" style="font-size: 0.92rem">
+          <span class="mascots" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path fill="#8B5CF6" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+            <svg viewBox="0 0 24 24"><path fill="#111418" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+            <svg viewBox="0 0 24 24"><path fill="#F97316" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+            <svg viewBox="0 0 24 24"><path fill="#FACC15" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+          </span>
+          <span>TienCoder API · AI model gateway</span>
+        </div>
+        <div class="mono" style="font-size: 0.82rem; display: flex; align-items: center; gap: 8px">
+          <span>tiencoder.tech</span>
+          <span>·</span>
+          <span style="color: #065f46; font-weight: 700"><span class="status-dot"></span> Hệ thống đang hoạt động</span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Available Lines Modal -->
+    <dialog id="lines-modal" class="modal" aria-labelledby="lines-modal-title">
+      <div class="modal-header">
+        <div>
+          <h3 id="lines-modal-title">Danh sách tuyến model</h3>
+          <div class="ticket-sub" id="lines-modal-sub">LIVE ROUTING TABLE</div>
+        </div>
+        <button id="close-lines-modal" type="button" class="btn btn-outline btn-sm">Đóng</button>
+      </div>
+      <div class="modal-body" id="lines-modal-body"></div>
+      <div class="modal-footer">
+        <a class="btn btn-dark btn-sm" href="/sign-up">
+          <span>Lấy khóa API</span>
+          <span class="arrow-circle" style="width: 22px; height: 22px; font-size: 0.8rem" aria-hidden="true">→</span>
+        </a>
+      </div>
+    </dialog>
+
+    <script type="module" src="/assets/landing.js"></script>
+  </body>
+</html>

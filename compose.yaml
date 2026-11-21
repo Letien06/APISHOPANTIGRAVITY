@@ -1,0 +1,22 @@
+services:
+  gateway:
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 2m30s
+    network_mode: host
+    env_file: .env
+    environment:
+      HOST: 127.0.0.1
+      DB_PATH: /app/data/gateway.sqlite
+      MODELS_FILE: /app/models.json
+    volumes:
+      - gateway-data:/app/data
+      - type: bind
+        source: ./models.json
+        target: /app/models.json
+        read_only: true
+        bind:
+          create_host_path: false
+
+volumes:
+  gateway-data:

@@ -1,0 +1,11 @@
+# Use your existing named tunnel ID and credentials file.
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: /etc/cloudflared/00000000-0000-0000-0000-000000000000.json
+
+ingress:
+  # In an existing config, add this rule before any matching wildcard rule.
+  - hostname: api.example.com
+    path: '^/(v1/(models|chat/completions|responses)|api/usage(/requests)?)$'
+    service: http://127.0.0.1:20129
+  # Route a future /usage frontend through its own ingress rule and service.
+  - service: http_status:404

@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Quản trị TienCoder API</title>
+    <link rel="icon" type="image/svg+xml" href="/admin/assets/favicon.svg?v=2" />
+    <link rel="stylesheet" href="/admin/assets/admin.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Chuyển tới nội dung chính</a>
+
+    <header class="page-header">
+      <div class="container header-inner">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">ADM</div>
+          <div>
+            <h1>Quản trị TienCoder API</h1>
+            <p>Quản lý tài khoản người dùng, nạp số dư ví USD, khóa API và lịch sử sử dụng</p>
+          </div>
+        </div>
+        <div class="header-right">
+          <span class="pill">Múi giờ: <strong>Giờ Việt Nam (UTC+7)</strong></span>
+          <button id="logout-btn" type="button" class="btn btn-danger-outline btn-sm hidden">Đăng xuất</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content" class="container">
+      <div id="live-status" class="sr-only" role="status" aria-live="polite"></div>
+
+      <section id="auth-section" class="card auth-card" aria-labelledby="auth-heading">
+        <h2 id="auth-heading">Đăng nhập quản trị viên</h2>
+        <p>Nhập tài khoản và mật khẩu quản trị để quản lý người dùng, nạp số dư ví và khóa API.</p>
+
+        <div id="auth-error" class="alert alert-danger hidden" role="alert"></div>
+
+        <form id="password-auth-form" autocomplete="on" novalidate>
+          <div class="field">
+            <label class="field-label" for="admin-username-input">Tên tài khoản</label>
+            <input
+              id="admin-username-input"
+              class="text-input"
+              type="text"
+              value="admin"
+              autocomplete="username"
+              placeholder="admin"
+              required
+            />
+          </div>
+          <div class="field">
+            <label class="field-label" for="admin-password-input">Mật khẩu</label>
+            <div class="password-wrap">
+              <input
+                id="admin-password-input"
+                class="text-input"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Nhập mật khẩu quản trị"
+                required
+              />
+              <button
+                id="toggle-admin-password"
+                type="button"
+                class="toggle-secret-btn"
+                aria-pressed="false"
+                aria-controls="admin-password-input"
+              >
+                Hiện mật khẩu
+              </button>
+            </div>
+          </div>
+          <button id="password-auth-submit" type="submit" class="btn btn-primary">Đăng nhập quản trị</button>
+        </form>
+
+        <details style="margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border)">
+          <summary style="cursor: pointer; font-size: 0.86rem; font-weight: 600; color: var(--ink-secondary)">
+            Hoặc đăng nhập bằng mã ADMIN_TOKEN
+          </summary>
+          <form id="auth-form" autocomplete="off" novalidate style="margin-top: 12px">
+            <div class="field">
+              <label class="field-label" for="admin-token-input">Mã quản trị (ADMIN_TOKEN)</label>
+              <div class="password-wrap">
+                <input
+                  id="admin-token-input"
+                  class="text-input mono-input"
+                  type="password"
+                  placeholder="Dán ADMIN_TOKEN từ file .env trên VPS"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  required
+                />
+                <button
+                  id="toggle-admin-token"
+                  type="button"
+                  class="toggle-secret-btn"
+                  aria-pressed="false"
+                  aria-controls="admin-token-input"
+                >
+                  Hiện mã
+                </button>
+              </div>
+            </div>
+            <button id="auth-submit-btn" type="submit" class="btn btn-secondary">Kết nối bằng ADMIN_TOKEN</button>
+          </form>
+        </details>
+      </section>
+
+      <div id="workspace" class="hidden">
+        <div id="global-feedback" class="alert hidden" role="status" aria-live="polite"></div>
+
+        <section class="card section" aria-labelledby="keys-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="keys-heading">Danh sách khóa API</h2>
+              <span class="sub-line" id="keys-subtitle">Quản lý hạn mức USD (1 USD = 1.000.000 micros), hạn dùng và trạng thái từng khóa</span>
+            </div>
+            <div class="toolbar-actions">
+              <button id="refresh-all-btn" type="button" class="btn btn-secondary">Làm mới</button>
+              <button id="open-create-key-btn" type="button" class="btn btn-primary">+ Tạo khóa mới</button>
+            </div>
+          </div>
+
+          <div id="keys-empty" class="empty-state hidden">
+            <p>Chưa có khóa nào được tạo. Bấm <strong>+ Tạo khóa mới</strong> để cấp khóa đầu tiên.</p>
+          </div>
+
+          <div id="keys-table-wrap" class="table-scroll hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Tên &amp; Tiền tố</th>
+                  <th scope="col">Trạng thái</th>
+                  <th scope="col">Hạn mức / Đã dùng / Giữ chỗ / Còn lại</th>
+                  <th scope="col">Request</th>
+                  <th scope="col">Hạn dùng (UTC+7)</th>
+                  <th scope="col">Quyền model</th>
+                  <th scope="col">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody id="keys-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="detail-section" class="card section hidden" aria-labelledby="detail-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="detail-heading">Chi tiết khóa</h2>
+              <span id="detail-prefix" class="sub-line mono"></span>
+            </div>
+            <div class="toolbar-actions">
+              <span id="detail-status-badge" class="badge badge-neutral"></span>
+              <button id="detail-edit-btn" type="button" class="btn btn-secondary btn-sm">Chỉnh sửa</button>
+              <button id="detail-toggle-enabled-btn" type="button" class="btn btn-danger-outline btn-sm">Vô hiệu hóa khóa</button>
+              <button id="detail-close-btn" type="button" class="btn btn-secondary btn-sm">Đóng chi tiết</button>
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Hạn mức</div>
+              <div class="kpi-value" id="detail-quota">$0.00</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Đã dùng</div>
+              <div class="kpi-value" id="detail-used">$0.00</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Đang giữ chỗ</div>
+              <div class="kpi-value" id="detail-reserved">$0.00</div>
+            </div>
+            <div class="kpi-card kpi-highlight">
+              <div class="kpi-label">Còn lại</div>
+              <div class="kpi-value" id="detail-remaining">$0.00</div>
+            </div>
+          </div>
+
+          <dl class="meta-grid">
+            <div class="meta-item">
+              <dt>Số request đã gửi</dt>
+              <dd id="detail-requests" class="num">0</dd>
+            </div>
+            <div class="meta-item">
+              <dt>Ngày tạo (Giờ Việt Nam — UTC+7)</dt>
+              <dd id="detail-created" class="num"></dd>
+            </div>
+            <div class="meta-item">
+              <dt>Hạn dùng (Giờ Việt Nam — UTC+7)</dt>
+              <dd id="detail-expires" class="num"></dd>
+            </div>
+            <div class="meta-item" style="grid-column: 1 / -1">
+              <dt>Quyền model</dt>
+              <dd id="detail-models"></dd>
+            </div>
+          </dl>
+
+          <div class="toolbar">
+            <div>
+              <h3>Lịch sử yêu cầu của khóa</h3>
+              <span class="sub-line">Mới nhất trước · Thời gian hiển thị theo Giờ Việt Nam (UTC+7)</span>
+            </div>
+            <span id="detail-history-count" class="badge badge-neutral">0 mục</span>
+          </div>
+
+          <div id="detail-history-error" class="alert alert-danger hidden" role="alert"></div>
+          <div id="detail-history-empty" class="empty-state hidden">
+            <p>Khóa này chưa có lượt gọi nào.</p>
+          </div>
+
+          <div id="detail-history-table-wrap" class="table-scroll hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Thời điểm (UTC+7)</th>
+                  <th scope="col">Model &amp; Endpoint</th>
+                  <th scope="col">Trạng thái</th>
+                  <th scope="col">Đầu vào</th>
+                  <th scope="col">Đầu ra</th>
+                  <th scope="col">Tổng trừ vào hạn mức</th>
+                </tr>
+              </thead>
+              <tbody id="detail-history-tbody"></tbody>
+            </table>
+          </div>
+
+          <div id="detail-load-more-wrap" class="load-more-wrap hidden">
+            <button id="detail-load-more-btn" type="button" class="btn btn-secondary">Tải thêm</button>
+          </div>
+        </section>
+
+        <section class="card section" aria-labelledby="users-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="users-heading">Tài khoản người dùng đã đăng ký</h2>
+              <span class="sub-line">Quản lý hạn mức tài khoản (USD) và trạng thái đăng nhập của bạn bè</span>
+            </div>
+            <span id="users-count" class="badge badge-neutral">0 tài khoản</span>
+          </div>
+
+          <div id="users-empty" class="empty-state hidden">
+            <p>Chưa có người dùng nào đăng ký tài khoản.</p>
+          </div>
+
+          <div id="users-table-wrap" class="table-scroll hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Tài khoản &amp; Email</th>
+                  <th scope="col">Trạng thái</th>
+                  <th scope="col">Hạn mức ví / Đã dùng / Còn lại</th>
+                  <th scope="col">Số khóa / Request</th>
+                  <th scope="col">Ngày tạo (UTC+7)</th>
+                  <th scope="col">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody id="users-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card section" aria-labelledby="models-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="models-heading">Danh mục model được cấu hình</h2>
+              <span class="sub-line">Giá tính theo USD trên mỗi 1.000.000 token và giới hạn token tối đa mỗi lượt gọi</span>
+            </div>
+            <span id="models-count" class="badge badge-neutral">0 model</span>
+          </div>
+
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">ID Model</th>
+                  <th scope="col">Giá đầu vào / 1M token</th>
+                  <th scope="col">Giá đầu ra / 1M token</th>
+                  <th scope="col">Giới hạn token vào</th>
+                  <th scope="col">Giới hạn token ra</th>
+                  <th scope="col">Trường giới hạn chat</th>
+                </tr>
+              </thead>
+              <tbody id="models-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Create / Edit Key Modal -->
+    <dialog id="key-modal" class="modal" aria-labelledby="key-modal-title">
+      <form id="key-modal-form" novalidate>
+        <div class="modal-header">
+          <h3 id="key-modal-title">Tạo khóa mới</h3>
+          <button type="button" class="btn btn-secondary btn-sm" id="key-modal-close-x">Đóng</button>
+        </div>
+        <div class="modal-body">
+          <div id="key-modal-error" class="alert alert-danger hidden" role="alert"></div>
+
+          <div class="field">
+            <label class="field-label" for="key-name-input">Tên khóa (1–100 ký tự)</label>
+            <input id="key-name-input" class="text-input" type="text" maxlength="100" placeholder="Ví dụ: Bạn Minh" required />
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="key-quota-input">Hạn mức (USD, tối đa 6 chữ số thập phân)</label>
+            <input
+              id="key-quota-input"
+              class="text-input mono-input"
+              type="text"
+              inputmode="decimal"
+              placeholder="Ví dụ: 5 hoặc 1.25"
+              required
+            />
+            <p class="field-hint" id="key-quota-hint">1 USD = 1.000.000 micros. Nhập chính xác tới 0.000001 USD.</p>
+          </div>
+
+          <fieldset class="fieldset-clean">
+            <legend>Hạn dùng — Giờ Việt Nam (UTC+7)</legend>
+            <label class="checkbox-row">
+              <input id="key-no-expiry" type="checkbox" checked />
+              <span>Không đặt hạn dùng</span>
+            </label>
+            <div id="key-expiry-input-wrap" class="field hidden" style="margin-top: 8px; margin-bottom: 0">
+              <label class="field-label" for="key-expiry-input">Thời điểm hết hạn (Giờ Việt Nam — UTC+7)</label>
+              <input id="key-expiry-input" class="text-input" type="datetime-local" />
+              <p class="field-hint">Hệ thống tự động chuyển sang chuẩn UTC (hậu tố Z) khi gửi tới gateway.</p>
+            </div>
+          </fieldset>
+
+          <fieldset class="fieldset-clean">
+            <legend>Quyền sử dụng model</legend>
+            <label class="radio-row">
+              <input type="radio" name="modelScope" value="all" checked />
+              <span>Tất cả model được cấu hình</span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="modelScope" value="custom" />
+              <span>Chỉ các model được chọn bên dưới</span>
+            </label>
+            <div id="key-model-checklist" class="model-checklist hidden" role="group" aria-label="Danh sách model cho phép"></div>
+          </fieldset>
+
+          <div id="key-enabled-field" class="field hidden">
+            <label class="checkbox-row">
+              <input id="key-enabled-input" type="checkbox" checked />
+              <span>Khóa đang được bật (cho phép sử dụng)</span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="key-modal-cancel">Hủy</button>
+          <button type="submit" class="btn btn-primary" id="key-modal-submit">Lưu</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- One-Time Key Reveal Modal -->
+    <dialog id="reveal-modal" class="modal" aria-labelledby="reveal-modal-title">
+      <div class="modal-header">
+        <h3 id="reveal-modal-title">Khóa API mới đã được tạo</h3>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-warning" role="alert">
+          <strong>Lưu khóa ngay bây giờ!</strong> Đây là <strong>lần duy nhất</strong> hệ thống hiển thị khóa đầy đủ.
+          Sau khi đóng hộp thoại này, giá trị khóa sẽ bị xóa khỏi giao diện và danh sách chỉ hiển thị tiền tố.
+        </div>
+        <div class="field">
+          <div class="field-label">Tên khóa: <span id="reveal-key-name"></span></div>
+          <div id="reveal-key-value" class="secret-reveal-box" tabindex="0"></div>
+        </div>
+        <div class="toolbar-actions">
+          <button id="copy-revealed-key-btn" type="button" class="btn btn-primary">Sao chép khóa</button>
+          <span id="copy-feedback" class="field-hint" role="status" aria-live="polite" style="align-self: center"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="close-reveal-modal-btn" type="button" class="btn btn-secondary">Tôi đã lưu khóa — Đóng</button>
+      </div>
+    </dialog>
+
+    <!-- Confirm Disable Key Modal -->
+    <dialog id="disable-modal" class="modal" aria-labelledby="disable-modal-title">
+      <div class="modal-header">
+        <h3 id="disable-modal-title">Xác nhận vô hiệu hóa khóa</h3>
+      </div>
+      <div class="modal-body">
+        <p id="disable-modal-message"></p>
+        <p class="field-hint">
+          Khóa sau khi vô hiệu hóa sẽ bị từ chối ở cả API suy luận và trang tra cứu công khai. Lịch sử yêu cầu vẫn được lưu lại
+          để đối soát và bạn có thể bật lại khóa sau này.
+        </p>
+        <div id="disable-modal-error" class="alert alert-danger hidden" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="disable-modal-cancel" type="button" class="btn btn-secondary">Hủy</button>
+        <button id="disable-modal-confirm" type="button" class="btn btn-danger">Vô hiệu hóa khóa</button>
+      </div>
+    </dialog>
+
+    <!-- Edit User Quota Modal -->
+    <dialog id="user-modal" class="modal" aria-labelledby="user-modal-title">
+      <form id="user-modal-form" novalidate>
+        <div class="modal-header">
+          <h3 id="user-modal-title">Cập nhật hạn mức tài khoản</h3>
+          <button type="button" class="btn btn-secondary btn-sm" id="user-modal-close-x">Đóng</button>
+        </div>
+        <div class="modal-body">
+          <div id="user-modal-error" class="alert alert-danger hidden" role="alert"></div>
+          <div class="field">
+            <label class="field-label" for="user-quota-input">Tổng hạn mức ví (USD)</label>
+            <input id="user-quota-input" class="text-input mono-input" type="text" inputmode="decimal" required />
+            <div class="row-actions" style="margin-top: 8px">
+              <button type="button" class="btn btn-secondary btn-sm" data-add-usd="1">+$1</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-add-usd="5">+$5</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-add-usd="10">+$10</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-add-usd="20">+$20</button>
+            </div>
+            <p class="field-hint" id="user-quota-hint"></p>
+          </div>
+          <div class="field">
+            <label class="checkbox-row">
+              <input id="user-enabled-input" type="checkbox" checked />
+              <span>Cho phép tài khoản đăng nhập và sử dụng khóa</span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="user-modal-cancel">Hủy</button>
+          <button type="submit" class="btn btn-primary" id="user-modal-submit">Lưu</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="/admin/assets/admin.js"></script>
+  </body>
+</html>

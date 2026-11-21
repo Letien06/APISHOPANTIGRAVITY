@@ -1,0 +1,26 @@
+services:
+  usage-ui:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    container_name: 9router-usage-ui
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PUBLIC_UI_HOST: 127.0.0.1
+      PUBLIC_UI_PORT: 20132
+      GATEWAY_ORIGIN: http://127.0.0.1:20129
+    command: ["node", "frontend/server-public.mjs"]
+
+  admin-ui:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    container_name: 9router-admin-ui
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      ADMIN_UI_HOST: 127.0.0.1
+      ADMIN_UI_PORT: 20131
+      GATEWAY_ORIGIN: http://127.0.0.1:20129
+    command: ["node", "frontend/server-admin.mjs"]

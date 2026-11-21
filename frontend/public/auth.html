@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Hộ chiếu API — Đăng nhập / Đăng ký · TienCoder API</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg?v=2" />
+    <link rel="stylesheet" href="/assets/passport.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Chuyển tới nội dung chính</a>
+
+    <div class="edge-strip" aria-hidden="true">
+      <span class="s-purple"></span>
+      <span class="s-black"></span>
+      <span class="s-orange"></span>
+      <span class="s-yellow"></span>
+    </div>
+
+    <header class="site-nav">
+      <div class="container nav-inner">
+        <div class="nav-left">
+          <a class="btn btn-outline btn-sm" href="/">← Về trang chủ</a>
+          <a class="brand-link" href="/">
+            <span class="mascots" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path fill="#8B5CF6" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#111418" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#F97316" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#FACC15" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#111418"/><circle cx="14.8" cy="10.5" r="1.4" fill="#111418"/></svg>
+            </span>
+            <span>TienCoder API</span>
+          </a>
+        </div>
+
+        <div class="nav-right">
+          <a class="nav-link desktop-only" href="/docs">Hướng dẫn</a>
+          <a class="nav-link desktop-only" href="/usage">Tra cứu nhanh /usage</a>
+          <span class="eyebrow-pill"><span class="status-dot"></span> GATEWAY /V1 ONLINE</span>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content" class="container" style="padding-bottom: 48px">
+      <div class="passport-split">
+        <span class="fold-notch top" aria-hidden="true"></span>
+        <span class="fold-notch bottom" aria-hidden="true"></span>
+
+        <section class="passport-page passport-page-left" aria-label="Xem trước hộ chiếu API">
+          <div>
+            <span id="left-eyebrow" class="eyebrow-pill">NEW PASSPORT ISSUING · FREE</span>
+            <h1 id="left-heading" class="section-title" style="margin: 14px 0 18px; line-height: 1.15">
+              Nhận ngay<br /><span class="mint-text">hộ chiếu API của bạn.</span>
+            </h1>
+
+            <div class="mini-passport">
+              <div class="mini-passport-top">
+                <span style="display: inline-flex; align-items: center; gap: 6px">
+                  <span class="mascots" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" style="width: 14px; height: 14px"><path fill="#8B5CF6" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+                    <svg viewBox="0 0 24 24" style="width: 14px; height: 14px"><path fill="#111418" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+                    <svg viewBox="0 0 24 24" style="width: 14px; height: 14px"><path fill="#F97316" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+                    <svg viewBox="0 0 24 24" style="width: 14px; height: 14px"><path fill="#FACC15" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/></svg>
+                  </span>
+                  <span>MODEL PASSPORT</span>
+                </span>
+                <span>TIER: /V1 READY</span>
+              </div>
+
+              <div class="mini-field-label">CHỦ HỘ CHIẾU (HOLDER)</div>
+              <div id="preview-holder" class="mini-field-val">ban_cua_toi@tiencoder.tech</div>
+
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+                <div>
+                  <div class="mini-field-label">API KEY</div>
+                  <div class="mini-field-val" style="margin-bottom: 0">gw_••••••••••••2026</div>
+                </div>
+                <span class="badge badge-success">ACTIVE</span>
+              </div>
+
+              <div style="margin-top: 16px; display: flex; align-items: flex-end; justify-content: space-between; gap: 10px">
+                <div>
+                  <svg width="110" height="32" viewBox="0 0 110 32" aria-hidden="true">
+                    <rect x="0" y="2" width="3" height="28" fill="#111418"/>
+                    <rect x="6" y="2" width="1.5" height="28" fill="#111418"/>
+                    <rect x="10" y="2" width="4" height="28" fill="#111418"/>
+                    <rect x="17" y="2" width="2" height="28" fill="#111418"/>
+                    <rect x="22" y="2" width="5" height="28" fill="#111418"/>
+                    <rect x="30" y="2" width="2" height="28" fill="#111418"/>
+                    <rect x="35" y="2" width="3" height="28" fill="#111418"/>
+                    <rect x="42" y="2" width="1.5" height="28" fill="#111418"/>
+                    <rect x="47" y="2" width="4" height="28" fill="#111418"/>
+                    <rect x="54" y="2" width="2" height="28" fill="#111418"/>
+                    <rect x="60" y="2" width="4.5" height="28" fill="#111418"/>
+                    <rect x="68" y="2" width="2" height="28" fill="#111418"/>
+                    <rect x="74" y="2" width="3.5" height="28" fill="#111418"/>
+                    <rect x="81" y="2" width="2" height="28" fill="#111418"/>
+                    <rect x="87" y="2" width="5" height="28" fill="#111418"/>
+                    <rect x="96" y="2" width="2" height="28" fill="#111418"/>
+                    <rect x="102" y="2" width="4" height="28" fill="#111418"/>
+                  </svg>
+                  <div class="ticket-sub">ISSUED: 2026 / V1-GATEWAY</div>
+                </div>
+              </div>
+
+              <div id="preview-stamp" class="stamp" style="right: 12px; bottom: 12px; width: 70px; height: 70px">
+                <span>NEW PASS</span>
+                <span>PENDING</span>
+              </div>
+            </div>
+          </div>
+
+          <ul class="check-list">
+            <li><span class="check-icon">✓</span> Tự tạo và quản lý khóa <code>gw_</code> ngay trên Console</li>
+            <li><span class="check-icon">✓</span> Tương thích trực tiếp OpenAI SDK, Cursor, Cline, Windsurf</li>
+            <li><span class="check-icon">✓</span> Theo dõi chi phí từng token theo Giờ Việt Nam (UTC+7)</li>
+            <li><span class="check-icon">✓</span> Đã có khóa sẵn? <a href="/usage" style="color: #059669; font-weight: 700">Tra cứu nhanh tại /usage</a></li>
+          </ul>
+        </section>
+
+        <section class="passport-page passport-page-right" aria-label="Biểu mẫu xác thực">
+          <div class="segmented" role="tablist" aria-label="Chọn chế độ">
+            <button id="tab-signin" type="button" class="seg-btn" role="tab" aria-selected="false">Đăng nhập</button>
+            <button id="tab-signup" type="button" class="seg-btn active" role="tab" aria-selected="true">Đăng ký miễn phí</button>
+          </div>
+
+          <div id="auth-alert" class="alert alert-danger hidden" role="alert"></div>
+
+          <!-- Sign In Form -->
+          <form id="signin-form" class="hidden" novalidate>
+            <div class="field">
+              <label class="field-label" for="signin-identifier">Tên đăng nhập hoặc Email</label>
+              <input
+                id="signin-identifier"
+                class="text-input"
+                type="text"
+                autocomplete="username"
+                placeholder="username hoặc ban@example.com"
+                required
+              />
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="signin-password">Mật khẩu</label>
+              <div class="password-wrap">
+                <input
+                  id="signin-password"
+                  class="text-input"
+                  type="password"
+                  autocomplete="current-password"
+                  placeholder="Nhập mật khẩu của bạn"
+                  required
+                />
+                <button type="button" class="toggle-secret-btn" data-toggle-for="signin-password" aria-pressed="false">
+                  Hiện mật khẩu
+                </button>
+              </div>
+            </div>
+
+            <button id="signin-submit" type="submit" class="btn btn-dark btn-full" style="margin-top: 18px">
+              <span>Xác minh hộ chiếu, vào Console</span>
+              <span class="arrow-circle" aria-hidden="true">→</span>
+            </button>
+          </form>
+
+          <!-- Sign Up Form -->
+          <form id="signup-form" novalidate>
+            <div class="field">
+              <label class="field-label" for="signup-username">Tên đăng nhập</label>
+              <input
+                id="signup-username"
+                class="text-input"
+                type="text"
+                autocomplete="username"
+                placeholder="3–32 ký tự: chữ cái, số, _ hoặc -"
+                required
+              />
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="signup-email">Email</label>
+              <input
+                id="signup-email"
+                class="text-input"
+                type="email"
+                autocomplete="email"
+                placeholder="name@example.com"
+                required
+              />
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="signup-password">Đặt mật khẩu</label>
+              <div class="password-wrap">
+                <input
+                  id="signup-password"
+                  class="text-input"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="8–128 ký tự"
+                  required
+                />
+                <button type="button" class="toggle-secret-btn" data-toggle-for="signup-password" aria-pressed="false">
+                  Hiện mật khẩu
+                </button>
+              </div>
+              <div class="strength-row" aria-live="polite">
+                <div class="strength-bars" aria-hidden="true">
+                  <div class="strength-bar" id="sb-1"></div>
+                  <div class="strength-bar" id="sb-2"></div>
+                  <div class="strength-bar" id="sb-3"></div>
+                  <div class="strength-bar" id="sb-4"></div>
+                </div>
+                <span id="strength-label" class="strength-label">Chưa nhập</span>
+              </div>
+            </div>
+
+            <div class="field" id="invite-field-wrap">
+              <button id="toggle-invite-btn" type="button" class="btn btn-sm" style="padding: 0; min-height: auto; background: none; color: #475569">
+                Có mã mời? ▾
+              </button>
+              <div id="invite-input-box" class="hidden" style="margin-top: 8px">
+                <label class="field-label" for="signup-invite">Mã mời</label>
+                <input id="signup-invite" class="text-input mono-input" type="text" placeholder="Nhập mã mời (nếu hệ thống yêu cầu)" />
+              </div>
+            </div>
+
+            <p id="signup-quota-note" class="field-hint" style="margin-bottom: 14px"></p>
+
+            <button id="signup-submit" type="submit" class="btn btn-dark btn-full">
+              <span>Tạo tài khoản, cấp hộ chiếu</span>
+              <span class="arrow-circle" aria-hidden="true">→</span>
+            </button>
+          </form>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="/assets/auth.js"></script>
+  </body>
+</html>

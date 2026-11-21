@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Tra cứu mức sử dụng — TienCoder API</title>
+    <link rel="icon" type="image/svg+xml" href="/usage/assets/favicon.svg?v=2" />
+    <link rel="stylesheet" href="/usage/assets/usage.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Chuyển tới nội dung chính</a>
+
+    <div class="edge-strip" aria-hidden="true">
+      <span class="s-purple"></span>
+      <span class="s-black"></span>
+      <span class="s-orange"></span>
+      <span class="s-yellow"></span>
+    </div>
+
+    <header class="site-nav">
+      <div class="container nav-inner">
+        <div class="nav-left">
+          <a class="brand-link" href="/">
+            <span class="mascots" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path fill="#8B5CF6" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#111418" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#F97316" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#fff"/><circle cx="14.8" cy="10.5" r="1.4" fill="#fff"/></svg>
+              <svg viewBox="0 0 24 24"><path fill="#FACC15" d="M12 2a8 8 0 0 0-8 8v11l3-2.5L10 21l2-2.5L14 21l3-2.5L20 21V10a8 8 0 0 0-8-8Z"/><circle cx="9.2" cy="10.5" r="1.4" fill="#111418"/><circle cx="14.8" cy="10.5" r="1.4" fill="#111418"/></svg>
+            </span>
+            <span>TienCoder API</span>
+          </a>
+          <nav class="nav-links" aria-label="Điều hướng chính">
+            <a class="nav-link" href="/">Trang chủ</a>
+            <a class="nav-link" href="/docs">Hướng dẫn</a>
+            <a class="nav-link active" href="/usage">Tra cứu /usage</a>
+            <a class="nav-link" href="/console">Console</a>
+          </nav>
+        </div>
+
+        <div class="nav-right">
+          <span class="eyebrow-pill" aria-label="Múi giờ hiển thị">Giờ Việt Nam (UTC+7)</span>
+          <a id="usage-nav-login" class="btn btn-dark btn-sm desktop-only" href="/sign-in">Đăng nhập</a>
+          <span id="usage-nav-user" class="badge badge-success mono hidden"></span>
+          <button id="usage-nav-logout" type="button" class="btn btn-danger-outline btn-sm hidden">Đăng xuất</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content" class="container" style="padding: 28px 24px 56px">
+      <section class="passport-card card-pad section-gap" aria-labelledby="key-form-heading">
+        <div style="margin-bottom: 14px">
+          <span class="eyebrow-pill"><span class="status-dot"></span> TRA CỨU NHANH BẰNG KHÓA GW_</span>
+          <h1 id="key-form-heading" class="section-title" style="margin-top: 8px; font-size: 1.45rem">
+            Kiểm tra hạn mức &amp; lịch sử yêu cầu
+          </h1>
+        </div>
+
+        <div id="account-keys-panel" class="account-keys-panel hidden" aria-label="Chọn khóa trong tài khoản của bạn">
+          <div class="toolbar" style="margin-bottom: 10px">
+            <div>
+              <strong style="font-size: 0.96rem">Khóa trong tài khoản của bạn</strong>
+              <span id="account-keys-sub" class="sub-line">Bấm chọn khóa để xem hạn mức &amp; lịch sử ngay mà không cần dán key</span>
+            </div>
+            <a class="btn btn-outline btn-sm" href="/console">Quản lý khóa →</a>
+          </div>
+          <div id="account-keys-pills" class="account-key-pills"></div>
+          <div id="account-keys-empty" class="sub-line hidden">
+            Tài khoản chưa có khóa nào. Vào <a href="/console">Console</a> để tạo khóa mới.
+          </div>
+        </div>
+
+        <div id="manual-key-divider" class="usage-divider hidden">
+          <span>Hoặc dán một khóa <code>gw_...</code> khác để tra cứu nhanh</span>
+        </div>
+
+        <form id="key-form" autocomplete="off" novalidate>
+          <div>
+            <label class="field-label" for="api-key-input">Khóa truy cập (bắt đầu bằng <code>gw_</code>)</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch">
+              <div class="password-wrap" style="flex: 1 1 300px">
+                <input
+                  id="api-key-input"
+                  name="apiKey"
+                  class="text-input mono-input"
+                  type="password"
+                  placeholder="Dán khóa gw_... của bạn vào đây"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  aria-describedby="key-input-hint"
+                />
+                <button
+                  id="toggle-key-visibility"
+                  type="button"
+                  class="toggle-secret-btn"
+                  aria-pressed="false"
+                  aria-controls="api-key-input"
+                >
+                  Hiện khóa
+                </button>
+              </div>
+              <div class="toolbar-actions">
+                <button id="submit-key-btn" type="submit" class="btn btn-dark">
+                  <span>Xem mức sử dụng</span>
+                  <span class="arrow-circle" aria-hidden="true">→</span>
+                </button>
+                <button id="refresh-btn" type="button" class="btn btn-outline" disabled>Làm mới</button>
+                <button id="clear-btn" type="button" class="btn btn-danger-outline" disabled>Xóa khóa</button>
+              </div>
+            </div>
+            <p id="key-input-hint" class="field-hint">
+              Khóa chỉ được giữ tạm trong bộ nhớ của tab này và tự động xóa khi bạn bấm Xóa khóa hoặc tải lại trang.
+            </p>
+          </div>
+        </form>
+
+        <div id="live-status" class="sr-only" role="status" aria-live="polite"></div>
+
+        <div id="loading-banner" class="loading-banner hidden" role="status" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="loading-text">Đang tải thông tin mức sử dụng...</span>
+        </div>
+
+        <div id="error-banner" class="alert alert-danger hidden" role="alert">
+          <div>
+            <strong id="error-title" style="display: block; margin-bottom: 2px">Không thể tải dữ liệu</strong>
+            <span id="error-message"></span>
+          </div>
+          <button id="retry-btn" type="button" class="btn btn-outline btn-sm">Thử lại</button>
+        </div>
+      </section>
+
+      <section id="empty-key-section" class="passport-card card-pad section-gap" aria-labelledby="empty-key-heading">
+        <div class="empty-state">
+          <h2 id="empty-key-heading">Chưa nhập khóa API</h2>
+          <p>
+            Dán khóa <code>gw_...</code> vào ô phía trên rồi bấm <strong>Xem mức sử dụng</strong> để kiểm tra hạn mức còn lại,
+            số lượt gọi và chi tiết chi phí đầu vào, đầu ra của từng request.
+          </p>
+        </div>
+      </section>
+
+      <section id="summary-section" class="passport-card card-pad section-gap hidden" aria-labelledby="summary-heading">
+        <div class="toolbar" style="padding-bottom: 14px; border-bottom: 1.5px dashed #cbd5e1">
+          <div>
+            <h2 id="summary-heading" style="font-size: 1.25rem">Thông tin khóa</h2>
+            <span id="key-prefix" class="sub-line mono"></span>
+          </div>
+          <div id="key-status-badge" class="badge badge-neutral"></div>
+        </div>
+
+        <div id="key-status-notice" class="alert alert-warning hidden" role="status">
+          <span id="key-status-notice-text"></span>
+        </div>
+
+        <div class="kpi-grid" aria-label="Tổng quan hạn mức USD">
+          <div class="kpi-card">
+            <div class="kpi-label">Hạn mức</div>
+            <div class="kpi-value" id="kpi-quota">$0.00</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Đã dùng</div>
+            <div class="kpi-value" id="kpi-used">$0.00</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Đang giữ chỗ</div>
+            <div class="kpi-value" id="kpi-reserved">$0.00</div>
+          </div>
+          <div class="kpi-card kpi-highlight">
+            <div class="kpi-label">Còn lại</div>
+            <div class="kpi-value" id="kpi-remaining">$0.00</div>
+          </div>
+        </div>
+
+        <div class="progress-wrap">
+          <div class="progress-meta">
+            <span>Tỷ lệ sử dụng hạn mức (1 USD = 1.000.000 micros)</span>
+            <span id="progress-percent" class="num">0%</span>
+          </div>
+          <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="usage-progressbar">
+            <div id="progress-used" class="progress-used" style="width: 0%"></div>
+            <div id="progress-reserved" class="progress-reserved" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <dl class="meta-grid">
+          <div class="meta-item">
+            <dt>Số request đã gửi</dt>
+            <dd id="meta-requests" class="num">0</dd>
+          </div>
+          <div class="meta-item">
+            <dt>Ngày tạo (Giờ Việt Nam — UTC+7)</dt>
+            <dd id="meta-created" class="num"></dd>
+          </div>
+          <div class="meta-item">
+            <dt>Hạn dùng (Giờ Việt Nam — UTC+7)</dt>
+            <dd id="meta-expires" class="num"></dd>
+          </div>
+          <div class="meta-item" style="grid-column: 1 / -1">
+            <dt>Quyền model</dt>
+            <dd id="meta-models"></dd>
+          </div>
+        </dl>
+      </section>
+
+      <section id="history-section" class="passport-card card-pad section-gap hidden" aria-labelledby="history-heading">
+        <div class="toolbar">
+          <div>
+            <h2 id="history-heading">Lịch sử yêu cầu</h2>
+            <span class="sub-line">Mới nhất trước · Thời gian hiển thị theo Giờ Việt Nam (UTC+7)</span>
+          </div>
+          <div class="toolbar-actions">
+            <button id="usage-live-toggle" type="button" class="btn btn-outline btn-sm live-toggle-btn" aria-pressed="true" title="Tự động cập nhật mỗi 3 giây">
+              <span class="live-dot-pulse" aria-hidden="true"></span>
+              <span>Trực tiếp</span>
+            </button>
+            <span id="history-count" class="badge badge-neutral">0 mục</span>
+          </div>
+        </div>
+
+        <div id="history-error" class="alert alert-danger hidden" role="alert">
+          <div>
+            <strong style="display: block">Không thể tải lịch sử yêu cầu</strong>
+            <span id="history-error-message"></span>
+          </div>
+          <button id="retry-history-btn" type="button" class="btn btn-outline btn-sm">Thử lại</button>
+        </div>
+
+        <div id="history-empty" class="empty-state hidden">
+          <h2>Chưa có yêu cầu nào</h2>
+          <p>Khóa này chưa phát sinh lượt gọi API nào.</p>
+        </div>
+
+        <div id="history-table-wrap" class="table-scroll usage-desktop-table hidden">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Thời điểm (UTC+7)</th>
+                <th scope="col">Model &amp; Endpoint</th>
+                <th scope="col">Trạng thái</th>
+                <th scope="col">Đầu vào</th>
+                <th scope="col">Đầu ra</th>
+                <th scope="col">Tổng trừ vào hạn mức</th>
+              </tr>
+            </thead>
+            <tbody id="history-tbody"></tbody>
+          </table>
+        </div>
+
+        <div id="history-mobile-list" class="mobile-history-list hidden" aria-label="Danh sách lịch sử yêu cầu"></div>
+
+        <div id="load-more-wrap" class="load-more-wrap hidden">
+          <button id="load-more-btn" type="button" class="btn btn-outline">Tải thêm</button>
+        </div>
+      </section>
+
+      <section id="available-models-section" class="passport-card card-pad section-gap hidden" aria-labelledby="available-models-heading">
+        <div class="toolbar">
+          <div>
+            <h2 id="available-models-heading">Danh sách model đang hỗ trợ</h2>
+            <span class="sub-line">Dùng đúng ID bên dưới khi gọi <code>https://api.tiencoder.tech/v1</code> — bấm để sao chép</span>
+          </div>
+          <span id="available-models-count" class="badge badge-success">0 model</span>
+        </div>
+        <div id="available-models-chips" class="model-chips"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/usage/assets/usage.js"></script>
+  </body>
+</html>
