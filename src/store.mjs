@@ -112,6 +112,11 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
         created_at TEXT NOT NULL
       ) STRICT;
       CREATE INDEX IF NOT EXISTS gateway_sessions_user ON gateway_sessions(user_id);
+      CREATE TABLE IF NOT EXISTS admin_sessions (
+        token_hash TEXT PRIMARY KEY,
+        expires_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      ) STRICT;
       CREATE TABLE IF NOT EXISTS gateway_keys (
         id TEXT PRIMARY KEY,
         user_id TEXT REFERENCES gateway_users(id),
@@ -272,6 +277,12 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
     const removeSession = db.prepare('DELETE FROM gateway_sessions WHERE token_hash = ?')
     const removeUserSessions = db.prepare('DELETE FROM gateway_sessions WHERE user_id = ?')
     const purgeExpiredSessions = db.prepare('DELETE FROM gateway_sessions WHERE expires_at <= ?')
+    const insertAdminSession = db.prepare(`
+      INSERT INTO admin_sessions (token_hash, expires_at, created_at) VALUES (?, ?, ?)
+    `)
+    const findAdminSession = db.prepare('SELECT expires_at FROM admin_sessions WHERE token_hash = ?')
+    const removeAdminSession = db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?')
+    const purgeExpiredAdminSessions = db.prepare('DELETE FROM admin_sessions WHERE expires_at <= ?')
 
     function getUserWallet(userId) {
       const owner = getUserById.get(userId)
@@ -407,7 +418,7 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           ))
         })
       },
-      reserve({ keyId, model, endpoint, inputReservedMicros, outputReservedMicros, leaseExpiresAt }) {
+      reserve({ keyId, model, endpoint, inputReservedMicros, outputReservedMicros, leaseExpiresAt, minReserveMicros = null }) {
         return transaction(() => {
           const now = Date.now()
           recoverStale(now)
@@ -420,12 +431,26 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           if (key.models !== null && !key.models.includes(model)) return { error: 'model_forbidden' }
           const projectedCost = inputReservedMicros + outputReservedMicros
           // For user-owned keys, key.remainingMicros is the atomic shared account wallet remaining balance.
-          if (projectedCost > key.remainingMicros) return { error: 'quota_exceeded' }
+          // When minReserveMicros is provided (inference routes), allow wallets >= minReserveMicros to call
+          // high-cap models by reserving up to remainingMicros atomically so wallets can never go negative.
+          const minRequired = minReserveMicros === null ? projectedCost : Math.min(projectedCost, minReserveMicros)
+          if (key.remainingMicros < minRequired || key.remainingMicros <= 0) return { error: 'quota_exceeded' }
+          const actualReserve = Math.min(projectedCost, key.remainingMicros)
+          let effectiveInputReserve = inputReservedMicros
+          let effectiveOutputReserve = outputReservedMicros
+          if (actualReserve < projectedCost && projectedCost > 0) {
+            effectiveInputReserve = Number((BigInt(inputReservedMicros) * BigInt(actualReserve)) / BigInt(projectedCost))
+            effectiveOutputReserve = actualReserve - effectiveInputReserve
+          }
           const row = insertRequest.get(
-            keyId, model, endpoint, inputReservedMicros, outputReservedMicros, leaseExpiresAt, new Date(now).toISOString(),
+            keyId, model, endpoint, effectiveInputReserve, effectiveOutputReserve, leaseExpiresAt, new Date(now).toISOString(),
           )
-          reserveOnKey.run(projectedCost, keyId)
-          return { id: row.id }
+          reserveOnKey.run(actualReserve, keyId)
+          return {
+            id: row.id,
+            inputReservedMicros: effectiveInputReserve,
+            outputReservedMicros: effectiveOutputReserve,
+          }
         })
       },
       settle(id, { httpStatus, status, inputTokens, outputTokens, cachedTokens = null, inputCostMicros, outputCostMicros, estimated }) {
@@ -531,6 +556,29 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
       deleteSession(token) {
         if (typeof token === 'string' && token.startsWith('sess_')) {
           removeSession.run(digest(token))
+        }
+      },
+      createAdminSession(ttlMs) {
+        const token = `adm_${randomBytes(32).toString('base64url')}`
+        const now = Date.now()
+        purgeExpiredAdminSessions.run(now)
+        insertAdminSession.run(digest(token), now + ttlMs, new Date(now).toISOString())
+        return token
+      },
+      hasAdminSession(token) {
+        if (typeof token !== 'string' || !token.startsWith('adm_')) return false
+        const hashKey = digest(token)
+        const row = findAdminSession.get(hashKey)
+        if (!row) return false
+        if (row.expires_at <= Date.now()) {
+          removeAdminSession.run(hashKey)
+          return false
+        }
+        return true
+      },
+      deleteAdminSession(token) {
+        if (typeof token === 'string' && token.startsWith('adm_')) {
+          removeAdminSession.run(digest(token))
         }
       },
       listUsers() {

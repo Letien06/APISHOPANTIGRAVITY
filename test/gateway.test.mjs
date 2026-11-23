@@ -237,22 +237,91 @@ test('prompt caching bills cached input tokens at 25% Gemini rate for both Chat 
   assert.equal(summary.usedMicros, 34);
 });
 
-test('a restarted process recovers a stale reservation once', () => {
+test('a restarted process recovers a stale reservation once and preserves admin sessions', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gateway-test-'));
   const database = join(dir, 'test.sqlite');
   let store = createStore(database);
   try {
     const { key, id } = store.createKey({ name: 'A', quotaMicros: 200, models: null });
+    const adminSess = store.createAdminSession(60_000);
+    assert.equal(store.hasAdminSession(adminSess), true);
     store.reserve({ keyId: id, model, endpoint: chat, inputReservedMicros: 20, outputReservedMicros: 30, leaseExpiresAt: 1 });
     store.close();
     store = createStore(database);
+    assert.equal(store.hasAdminSession(adminSess), true);
     assert.equal(store.findKey(key).usedMicros, 50);
     assert.equal(store.getKey(id).usedMicros, 50);
     assert.equal(store.getKey(id).reservedMicros, 0);
     assert.equal(store.listRequests(id).items[0].estimated, true);
+    store.deleteAdminSession(adminSess);
+    assert.equal(store.hasAdminSession(adminSess), false);
   } finally {
     store.close();
     for (const filename of readdirSync(dir)) rmSync(join(dir, filename));
     rmdirSync(dir);
+  }
+});
+
+test('a $1 starter wallet can call high-cap models via bounded reservation without going negative', () => {
+  const store = createStore(':memory:');
+  try {
+    const { id } = store.createKey({ name: 'Starter', quotaMicros: 1_000_000, models: null });
+    // Theoretical max reservation = $2.36 (e.g. Claude Opus $8/$40), wallet has $1.00
+    const job = store.reserve({
+      keyId: id,
+      model: 'claude-opus-5-5',
+      endpoint: chat,
+      inputReservedMicros: 1_048_576,
+      outputReservedMicros: 1_310_720,
+      leaseExpiresAt: Date.now() + 60_000,
+      minReserveMicros: 50_000,
+    });
+    assert.ok(job.id);
+    assert.equal(job.inputReservedMicros + job.outputReservedMicros, 1_000_000);
+    // Concurrent call blocked because entire $1.00 is reserved in flight
+    assert.deepEqual(
+      store.reserve({
+        keyId: id,
+        model: 'claude-opus-5-5',
+        endpoint: chat,
+        inputReservedMicros: 1_048_576,
+        outputReservedMicros: 1_310_720,
+        leaseExpiresAt: Date.now() + 60_000,
+        minReserveMicros: 50_000,
+      }),
+      { error: 'quota_exceeded' },
+    );
+    // Settle actual small cost ($0.04) -> wallet has $0.96 left
+    store.settle(job.id, {
+      httpStatus: 200,
+      status: 'success',
+      inputTokens: 2000,
+      outputTokens: 600,
+      cachedTokens: 0,
+      inputCostMicros: 16_000,
+      outputCostMicros: 24_000,
+      estimated: false,
+    });
+    const after = store.getKey(id);
+    assert.equal(after.usedMicros, 40_000);
+    assert.equal(after.reservedMicros, 0);
+    assert.equal(after.remainingMicros, 960_000);
+
+    // Wallet with $0.04 (< $0.05 minReserveMicros) is blocked for high-cap models
+    const lowKey = store.createKey({ name: 'Low', quotaMicros: 40_000, models: null });
+    assert.deepEqual(
+      store.reserve({
+        keyId: lowKey.id,
+        model: 'claude-opus-5-5',
+        endpoint: chat,
+        inputReservedMicros: 1_048_576,
+        outputReservedMicros: 1_310_720,
+        leaseExpiresAt: Date.now() + 60_000,
+        minReserveMicros: 50_000,
+      }),
+      { error: 'quota_exceeded' },
+    );
+  } finally {
+    store.close();
   }
 });

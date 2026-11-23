@@ -157,6 +157,9 @@ test('Public origin strictly isolates /usage and blocks all admin UI, assets, an
     ]) {
       const res = await fetch(`${publicOrigin}${path}`);
       assert.equal(res.status, 200, `Expected 200 for ${path}`);
+      if (path.endsWith('.js') || path.endsWith('.css')) {
+        assert.equal(res.headers.get('cache-control'), 'no-cache', `Expected no-cache for ${path}`);
+      }
     }
 
     // Blocked routes MUST return 404 on public origin

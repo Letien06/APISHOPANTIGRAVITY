@@ -346,7 +346,6 @@ export function createGateway({ config, store }) {
   const adminHash = hash(config.adminToken);
   const adminUsernameHash = hash((config.adminUsername ?? 'admin').toLowerCase());
   const adminPasswordHash = config.adminPassword ? hash(config.adminPassword) : null;
-  const adminSessions = new Map();
   const notFound = () => new HttpError(404, 'not_found', 'Route or resource not found.');
   const running = new Set();
   const checkAuthRate = createAuthRateLimiter();
@@ -498,15 +497,7 @@ export function createGateway({ config, store }) {
 
   function hasValidAdminSession(req) {
     const token = readCookie(req, ADMIN_SESSION_COOKIE);
-    if (!token || !token.startsWith('adm_')) return false;
-    const key = createHash('sha256').update(token).digest('hex');
-    const expiresAt = adminSessions.get(key);
-    if (!expiresAt) return false;
-    if (expiresAt <= Date.now()) {
-      adminSessions.delete(key);
-      return false;
-    }
-    return true;
+    return store.hasAdminSession(token);
   }
 
   async function admin(req, res, url) {
@@ -523,21 +514,14 @@ export function createGateway({ config, store }) {
       if (!userOk || !passOk) {
         throw new HttpError(401, 'invalid_credentials', 'Tên tài khoản hoặc mật khẩu quản trị không đúng.');
       }
-      const now = Date.now();
-      for (const [k, exp] of adminSessions) {
-        if (exp <= now) adminSessions.delete(k);
-      }
-      const sessToken = `adm_${randomBytes(32).toString('base64url')}`;
-      adminSessions.set(createHash('sha256').update(sessToken).digest('hex'), now + ADMIN_SESSION_TTL_MS);
+      const sessToken = store.createAdminSession(ADMIN_SESSION_TTL_MS);
       res.setHeader('set-cookie', sessionCookieHeader(req, sessToken, Math.floor(ADMIN_SESSION_TTL_MS / 1000), ADMIN_SESSION_COOKIE));
       return json(res, 200, { ok: true, username: config.adminUsername ?? 'admin' });
     }
 
     if (url.pathname === '/admin/v1/logout' && req.method === 'POST') {
       const token = readCookie(req, ADMIN_SESSION_COOKIE);
-      if (token && token.startsWith('adm_')) {
-        adminSessions.delete(createHash('sha256').update(token).digest('hex'));
-      }
+      if (token) store.deleteAdminSession(token);
       res.setHeader('set-cookie', sessionCookieHeader(req, '', 0, ADMIN_SESSION_COOKIE));
       res.writeHead(204);
       return res.end();
@@ -616,8 +600,13 @@ export function createGateway({ config, store }) {
     const job = store.reserve({
       keyId: key.id, model: model.id, endpoint, ...budget,
       leaseExpiresAt: Date.now() + config.upstreamTimeoutMs + 60_000,
+      minReserveMicros: 50_000,
     });
     if (job.error) throw keyError(job.error);
+    const effectiveBudget = {
+      inputReservedMicros: job.inputReservedMicros ?? budget.inputReservedMicros,
+      outputReservedMicros: job.outputReservedMicros ?? budget.outputReservedMicros,
+    };
 
     let observation;
     try {
@@ -629,7 +618,7 @@ export function createGateway({ config, store }) {
       observation = { httpStatus: null, status: 'transport_error', inputTokens: null, outputTokens: null };
       throw error;
     } finally {
-      store.settle(job.id, accounting(observation, model, budget));
+      store.settle(job.id, accounting(observation, model, effectiveBudget));
     }
     if (!res.writableEnded && !res.destroyed) res.end();
   }

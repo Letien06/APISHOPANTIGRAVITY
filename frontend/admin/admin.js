@@ -432,6 +432,16 @@ function renderKeysTable() {
       const copyBtn = key.canCopy
         ? `<button type="button" class="btn-copy-inline" data-action="copy" data-id="${escapeHtml(key.id)}" title="Sao chép khóa đầy đủ">Sao chép</button>`
         : '';
+      const ownerDisabled = Boolean(key.sharedWallet && key.accountEnabled === false);
+      const isKeyEnabled = Boolean(key.keyEnabled ?? key.enabled);
+      const statusHtml = ownerDisabled
+        ? `<span class="badge badge-danger">Tài khoản bị khóa</span><span class="sub-line">Mở lại ở tab Tài khoản</span>`
+        : `<span class="badge badge-${statusMeta.tone}">${escapeHtml(statusMeta.label)}</span>`;
+      const toggleBtnHtml = ownerDisabled
+        ? `<button type="button" class="btn btn-secondary btn-sm" data-action="open-owner" data-id="${escapeHtml(key.id)}" title="Tài khoản chủ sở hữu đang bị vô hiệu hóa">Mở khóa TK</button>`
+        : isKeyEnabled
+          ? `<button type="button" class="btn btn-danger-outline btn-sm" data-action="disable" data-id="${escapeHtml(key.id)}">Vô hiệu hóa</button>`
+          : `<button type="button" class="btn btn-primary btn-sm" data-action="enable" data-id="${escapeHtml(key.id)}">Bật lại</button>`;
       return `
         <tr class="${selected ? 'selected-row' : ''}" data-key-id="${escapeHtml(key.id)}">
           <td>
@@ -441,7 +451,7 @@ function renderKeysTable() {
               ${copyBtn}
             </div>
           </td>
-          <td><span class="badge badge-${statusMeta.tone}">${escapeHtml(statusMeta.label)}</span></td>
+          <td>${statusHtml}</td>
           <td class="num">
             <div>Hạn mức: <strong>${escapeHtml(formatMicrosToUsd(key.quotaMicros))}</strong></div>
             <span class="sub-line">
@@ -457,11 +467,7 @@ function renderKeysTable() {
             <div class="row-actions">
               <button type="button" class="btn btn-secondary btn-sm" data-action="view" data-id="${escapeHtml(key.id)}">Chi tiết</button>
               <button type="button" class="btn btn-secondary btn-sm" data-action="edit" data-id="${escapeHtml(key.id)}">Sửa</button>
-              ${
-                key.enabled
-                  ? `<button type="button" class="btn btn-danger-outline btn-sm" data-action="disable" data-id="${escapeHtml(key.id)}">Vô hiệu hóa</button>`
-                  : `<button type="button" class="btn btn-primary btn-sm" data-action="enable" data-id="${escapeHtml(key.id)}">Bật lại</button>`
-              }
+              ${toggleBtnHtml}
             </div>
           </td>
         </tr>
@@ -543,17 +549,24 @@ function renderSelectedDetail() {
   dom.detailPrefix.textContent = `${key.keyPrefix}••• (ID: ${key.id})`;
 
   const statusMeta = getKeyStatusMeta(key.status);
-  dom.detailStatusBadge.textContent = statusMeta.label;
-  dom.detailStatusBadge.className = `badge badge-${statusMeta.tone}`;
+  const ownerDisabled = Boolean(key.sharedWallet && key.accountEnabled === false);
+  const isKeyEnabled = Boolean(key.keyEnabled ?? key.enabled);
+  dom.detailStatusBadge.textContent = ownerDisabled ? 'Tài khoản bị khóa' : statusMeta.label;
+  dom.detailStatusBadge.className = `badge badge-${ownerDisabled ? 'danger' : statusMeta.tone}`;
 
   if (dom.detailCopyKeyBtn) {
     dom.detailCopyKeyBtn.classList.toggle('hidden', !key.canCopy);
   }
 
-  dom.detailToggleEnabledBtn.textContent = key.enabled ? 'Vô hiệu hóa khóa' : 'Bật lại khóa';
-  dom.detailToggleEnabledBtn.className = key.enabled
-    ? 'btn btn-danger-outline btn-sm'
-    : 'btn btn-primary btn-sm';
+  if (ownerDisabled) {
+    dom.detailToggleEnabledBtn.textContent = `Mở khóa @${key.username ?? 'tài khoản'}`;
+    dom.detailToggleEnabledBtn.className = 'btn btn-secondary btn-sm';
+  } else {
+    dom.detailToggleEnabledBtn.textContent = isKeyEnabled ? 'Vô hiệu hóa khóa' : 'Bật lại khóa';
+    dom.detailToggleEnabledBtn.className = isKeyEnabled
+      ? 'btn btn-danger-outline btn-sm'
+      : 'btn btn-primary btn-sm';
+  }
 
   dom.detailQuota.textContent = formatMicrosToUsd(key.quotaMicros) ?? 'Chưa có dữ liệu';
   dom.detailUsed.textContent = formatMicrosToUsd(key.usedMicros) ?? 'Chưa có dữ liệu';
@@ -1180,6 +1193,18 @@ dom.refreshAllBtn.addEventListener('click', async () => {
 
 dom.openCreateKeyBtn.addEventListener('click', openCreateKeyModal);
 
+function jumpToOwnerAccount(key) {
+  setActivePage('users');
+  if (dom.usersSearch && key?.username) {
+    dom.usersSearch.value = key.username;
+    renderUsersTable();
+  }
+  setGlobalFeedback(
+    `Tài khoản @${key?.username ?? ''} đang bị vô hiệu hóa — hãy bấm "Nạp / Sửa ví" để bật lại tài khoản.`,
+    'warning',
+  );
+}
+
 dom.keysTbody.addEventListener('click', (event) => {
   const btn = event.target.closest('button[data-action]');
   if (!btn) return;
@@ -1189,6 +1214,7 @@ dom.keysTbody.addEventListener('click', (event) => {
   if (btn.dataset.action === 'copy') copyAdminKeySecret(id, btn);
   else if (btn.dataset.action === 'view') openKeyDetail(id);
   else if (btn.dataset.action === 'edit') openEditKeyModal(key);
+  else if (btn.dataset.action === 'open-owner') jumpToOwnerAccount(key);
   else if (btn.dataset.action === 'disable') openDisableModal(key);
   else if (btn.dataset.action === 'enable') enableKey(key);
 });
@@ -1223,7 +1249,11 @@ dom.detailEditBtn.addEventListener('click', () => {
 
 dom.detailToggleEnabledBtn.addEventListener('click', () => {
   if (!state.selectedKey) return;
-  if (state.selectedKey.enabled) openDisableModal(state.selectedKey);
+  if (state.selectedKey.sharedWallet && state.selectedKey.accountEnabled === false) {
+    jumpToOwnerAccount(state.selectedKey);
+    return;
+  }
+  if (state.selectedKey.keyEnabled ?? state.selectedKey.enabled) openDisableModal(state.selectedKey);
   else enableKey(state.selectedKey);
 });
 
