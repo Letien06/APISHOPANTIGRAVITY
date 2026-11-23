@@ -1778,3 +1778,122 @@ dialog.modal::backdrop {
     padding: 20px;
   }
 }
+
+/* ===== Anti-FOUC Splash Overlay (with pure-CSS failsafe against stuck state) ===== */
+.tc-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  background: var(--cream, #f8f7f4);
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
+  animation: tc-splash-failsafe 0.28s ease 2.4s forwards;
+}
+
+.tc-splash.is-hidden {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  animation: none !important;
+}
+
+.tc-splash-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 28px;
+  background: #ffffff;
+  border: 2px solid var(--ink, #111418);
+  border-radius: 18px;
+  box-shadow: 5px 5px 0 var(--ink, #111418);
+}
+
+.tc-splash-mascots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tc-splash-mascots svg {
+  width: 22px;
+  height: 22px;
+  animation: tc-mascot-hop 0.9s ease-in-out infinite;
+}
+
+.tc-splash-mascots svg:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.tc-splash-mascots svg:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
+.tc-splash-mascots svg:nth-child(4) {
+  animation-delay: 0.36s;
+}
+
+.tc-splash-title {
+  font-weight: 900;
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+  color: var(--ink, #111418);
+}
+
+.tc-splash-bar {
+  width: 140px;
+  height: 5px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.tc-splash-bar span {
+  display: block;
+  width: 55%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--mint, #10b981);
+  animation: tc-splash-slide 1s ease-in-out infinite;
+}
+
+@keyframes tc-mascot-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes tc-splash-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+@keyframes tc-splash-failsafe {
+  to {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tc-splash {
+    transition: none;
+  }
+
+  .tc-splash-mascots svg,
+  .tc-splash-bar span {
+    animation: none;
+  }
+}

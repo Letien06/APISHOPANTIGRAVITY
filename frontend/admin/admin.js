@@ -1,5 +1,6 @@
 import {
   appendRequestPage,
+  dismissSplash,
   escapeHtml,
   formatInteger,
   formatLoadedCount,
@@ -9,6 +10,7 @@ import {
   formatVnDateTime,
   getKeyStatusMeta,
   getRequestStatusMeta,
+  initSplashGuard,
   isChargeCappedByReservation,
   isoUtcToVnInput,
   mergeRequestPages,
@@ -17,6 +19,8 @@ import {
   translateApiError,
   vnInputToIsoUtc,
 } from '/admin/assets/format.js';
+
+initSplashGuard();
 
 const PAGE_LIMIT = 50;
 const LIVE_INTERVAL_MS = 3000;
@@ -1491,4 +1495,7 @@ loadOverview({ keepSelected: false })
   .then(() => showAuthenticatedWorkspace())
   .catch(() => {
     // Stay on login screen
+  })
+  .finally(() => {
+    dismissSplash();
   });

@@ -1,4 +1,6 @@
-import { formatMicrosToUsd, translateApiError } from '/assets/format.js';
+import { dismissSplash, formatMicrosToUsd, initSplashGuard, translateApiError } from '/assets/format.js';
+
+initSplashGuard();
 
 const dom = {
   leftEyebrow: document.getElementById('left-eyebrow'),
@@ -193,22 +195,21 @@ dom.signupForm.addEventListener('submit', (event) => {
 
 async function initAuthPage() {
   setMode(mode, false);
-  // Check if already logged in
+  let redirecting = false;
   try {
-    const meRes = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' });
-    if (meRes.ok) {
+    const [meResult, cfgResult] = await Promise.allSettled([
+      fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' }),
+      fetch('/api/public/models', { cache: 'no-store' }),
+    ]);
+
+    if (meResult.status === 'fulfilled' && meResult.value.ok) {
+      redirecting = true;
       window.location.href = '/console';
       return;
     }
-  } catch {
-    // Stay on auth page
-  }
 
-  // Load public signup metadata (invite required & starter quota)
-  try {
-    const cfgRes = await fetch('/api/public/models', { cache: 'no-store' });
-    if (cfgRes.ok) {
-      const cfg = await cfgRes.json();
+    if (cfgResult.status === 'fulfilled' && cfgResult.value.ok) {
+      const cfg = await cfgResult.value.json();
       if (cfg.inviteRequired) {
         dom.inviteInputBox.classList.remove('hidden');
         dom.toggleInviteBtn.classList.add('hidden');
@@ -220,6 +221,8 @@ async function initAuthPage() {
     }
   } catch {
     // Non-fatal
+  } finally {
+    if (!redirecting) dismissSplash();
   }
 }
 

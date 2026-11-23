@@ -1,5 +1,6 @@
 import {
   appendRequestPage,
+  dismissSplash,
   escapeHtml,
   formatInteger,
   formatLoadedCount,
@@ -9,6 +10,7 @@ import {
   formatVnDateTime,
   getKeyStatusMeta,
   getRequestStatusMeta,
+  initSplashGuard,
   isChargeCappedByReservation,
   isoUtcToVnInput,
   mergeRequestPages,
@@ -17,6 +19,8 @@ import {
   translateApiError,
   vnInputToIsoUtc,
 } from '/assets/format.js';
+
+initSplashGuard();
 
 const PAGE_LIMIT = 50;
 const BASE_URL = 'https://api.tiencoder.tech/v1';
@@ -730,11 +734,15 @@ document.addEventListener('visibilitychange', () => {
 
 updateLiveToggleUi();
 loadAll()
-  .then(() => startConsoleLivePolling())
+  .then(() => {
+    startConsoleLivePolling();
+    dismissSplash();
+  })
   .catch((err) => {
     if (!err?.redirected) {
       dom.loading.classList.add('hidden');
       dom.body.classList.remove('hidden');
       setFeedback(err.message ?? 'Không thể tải Console.', 'danger');
+      dismissSplash();
     }
   });

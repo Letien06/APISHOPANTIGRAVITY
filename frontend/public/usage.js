@@ -1,5 +1,6 @@
 import {
   appendRequestPage,
+  dismissSplash,
   escapeHtml,
   formatInteger,
   formatLoadedCount,
@@ -7,11 +8,14 @@ import {
   formatVnDateTime,
   getKeyStatusMeta,
   getRequestStatusMeta,
+  initSplashGuard,
   isChargeCappedByReservation,
   mergeRequestPages,
   renderNullableValue,
   translateApiError,
 } from '/usage/assets/format.js';
+
+initSplashGuard();
 
 const PAGE_LIMIT = 50;
 
@@ -794,7 +798,7 @@ async function hydrateSessionHeader() {
 
     if (!hasActiveTarget() && !dom.keyInput.value.trim() && state.accountKeys.length > 0) {
       const preferred = state.accountKeys.find((k) => k.status === 'active') ?? state.accountKeys[0];
-      loadAccountKey(preferred.id);
+      await loadAccountKey(preferred.id);
     }
   } catch {
     // Guest view
@@ -923,5 +927,6 @@ state.pollTimer = setInterval(silentPollUsage, LIVE_INTERVAL_MS);
 
 updateUsageLiveUi();
 updateActionButtons();
-loadPublicModelsCatalog();
-hydrateSessionHeader();
+Promise.allSettled([loadPublicModelsCatalog(), hydrateSessionHeader()]).finally(() => {
+  dismissSplash();
+});

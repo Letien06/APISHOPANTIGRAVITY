@@ -295,3 +295,35 @@ export function formatLoadedCount(loaded, total) {
   }
   return `${formatInteger(safeTotal)} mục`;
 }
+
+let splashDismissed = false;
+let splashGuardInstalled = false;
+
+export function dismissSplash() {
+  if (splashDismissed || typeof document === 'undefined') return;
+  splashDismissed = true;
+  const el = document.getElementById('tc-splash');
+  if (!el) return;
+  el.classList.add('is-hidden');
+  el.setAttribute('aria-hidden', 'true');
+  setTimeout(() => {
+    el.remove();
+  }, 280);
+}
+
+export function initSplashGuard(maxWaitMs = 1800) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return dismissSplash;
+  }
+  if (!splashGuardInstalled) {
+    splashGuardInstalled = true;
+    // Guarantee splash can never stay stuck on slow networks, uncaught errors, or bfcache restores.
+    setTimeout(dismissSplash, maxWaitMs);
+    window.addEventListener('error', dismissSplash, { once: true });
+    window.addEventListener('unhandledrejection', dismissSplash, { once: true });
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) dismissSplash();
+    });
+  }
+  return dismissSplash;
+}

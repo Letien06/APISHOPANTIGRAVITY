@@ -1,4 +1,6 @@
-import { escapeHtml, formatInteger, formatMicrosToUsd } from '/assets/format.js';
+import { dismissSplash, escapeHtml, formatInteger, formatMicrosToUsd, initSplashGuard } from '/assets/format.js';
+
+initSplashGuard();
 
 const BASE_URL = 'https://api.tiencoder.tech/v1';
 
@@ -236,21 +238,20 @@ document.addEventListener('click', (event) => {
 async function hydrate() {
   renderModels(FALLBACK_MODELS);
   try {
-    const res = await fetch('/api/public/models', { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
+    const [modelsResult, meResult] = await Promise.allSettled([
+      fetch('/api/public/models', { cache: 'no-store' }),
+      fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' }),
+    ]);
+
+    if (modelsResult.status === 'fulfilled' && modelsResult.value.ok) {
+      const data = await modelsResult.value.json();
       if (Array.isArray(data?.items) && data.items.length > 0) {
         renderModels(data.items);
       }
     }
-  } catch {
-    // Keep fallback
-  }
 
-  try {
-    const meRes = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' });
-    if (meRes.ok) {
-      const data = await meRes.json();
+    if (meResult.status === 'fulfilled' && meResult.value.ok) {
+      const data = await meResult.value.json();
       if (data?.user?.username) {
         dom.navGuest.classList.add('hidden');
         dom.navUser.classList.remove('hidden');
@@ -258,7 +259,9 @@ async function hydrate() {
       }
     }
   } catch {
-    // Guest
+    // Keep fallback
+  } finally {
+    dismissSplash();
   }
 }
 
