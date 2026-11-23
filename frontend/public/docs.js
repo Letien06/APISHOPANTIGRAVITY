@@ -168,17 +168,21 @@ function renderModels(items) {
   dom.modelsCount.textContent = `${items.length} model`;
   dom.modelsTbody.innerHTML = items
     .map(
-      (m) => `
+      (m) => {
+        const cachedRate = m.cachedInputMicrosPerMillion ?? Math.round((m.inputMicrosPerMillion ?? 0) * 0.25);
+        return `
       <tr>
         <td class="mono"><strong>${escapeHtml(m.id)}</strong></td>
         <td class="num">${escapeHtml(formatMicrosToUsd(m.inputMicrosPerMillion))}</td>
+        <td class="num"><strong style="color: #059669">${escapeHtml(formatMicrosToUsd(cachedRate))}</strong></td>
         <td class="num">${escapeHtml(formatMicrosToUsd(m.outputMicrosPerMillion))}</td>
         <td class="num">${escapeHtml(formatInteger(m.maxInputTokens))} / ${escapeHtml(formatInteger(m.maxOutputTokens))} tok</td>
         <td>
           <button type="button" class="btn btn-outline btn-sm" data-copy-text="${escapeHtml(m.id)}">Sao chép ID</button>
         </td>
       </tr>
-    `,
+    `;
+      },
     )
     .join('');
 

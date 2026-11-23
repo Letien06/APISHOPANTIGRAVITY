@@ -76,6 +76,7 @@ function createObservation(httpStatus, chat, sse) {
   let failed = false;
   let inputTokens = null;
   let outputTokens = null;
+  let cachedTokens = 0;
 
   return {
     accept(value, event) {
@@ -117,6 +118,11 @@ function createObservation(httpStatus, chat, sse) {
       if (Number.isSafeInteger(input) && input >= 0 && Number.isSafeInteger(output) && output >= 0) {
         inputTokens = input;
         outputTokens = output;
+        const rawCached = usage?.prompt_tokens_details?.cached_tokens
+          ?? usage?.input_tokens_details?.cached_tokens
+          ?? usage?.cache_read_input_tokens
+          ?? usage?.cached_tokens;
+        cachedTokens = Number.isSafeInteger(rawCached) && rawCached > 0 ? Math.min(rawCached, input) : 0;
         if (chat && sse) terminal = true;
       }
     },
@@ -125,7 +131,7 @@ function createObservation(httpStatus, chat, sse) {
       if (failed) status = 'upstream_error';
       else if (interrupted || (sse && !terminal)) status = 'transport_error';
       else if (inputTokens === null) status = 'usage_missing';
-      return { httpStatus, status, inputTokens, outputTokens };
+      return { httpStatus, status, inputTokens, outputTokens, cachedTokens: inputTokens === null ? null : cachedTokens };
     },
   };
 }
@@ -241,8 +247,11 @@ async function readJsonResponse(body) {
 export async function proxyInference({ res, url, key, body, signal, requestId, endpoint }) {
   const chat = endpoint === '/v1/chat/completions';
   const streaming = body.stream === true;
+  const streamOptions = body.stream_options && typeof body.stream_options === 'object' && !Array.isArray(body.stream_options)
+    ? body.stream_options
+    : {};
   const payload = chat && streaming
-    ? { ...body, stream_options: { ...body.stream_options, include_usage: true } }
+    ? { ...body, stream_options: { ...streamOptions, include_usage: true } }
     : body;
 
   let observation;

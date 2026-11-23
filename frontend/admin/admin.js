@@ -1,6 +1,8 @@
 import {
+  appendRequestPage,
   escapeHtml,
   formatInteger,
+  formatLoadedCount,
   formatMicrosInputValue,
   formatMicrosToUsd,
   formatModelsSummary,
@@ -9,17 +11,20 @@ import {
   getRequestStatusMeta,
   isChargeCappedByReservation,
   isoUtcToVnInput,
+  mergeRequestPages,
   parseUsdToMicros,
   renderNullableValue,
   translateApiError,
   vnInputToIsoUtc,
 } from '/admin/assets/format.js';
 
-const PAGE_LIMIT = 25;
+const PAGE_LIMIT = 50;
+const LIVE_INTERVAL_MS = 3000;
 
 const dom = {
   liveStatus: document.getElementById('live-status'),
   logoutBtn: document.getElementById('logout-btn'),
+  adminLiveToggle: document.getElementById('admin-live-toggle'),
   authSection: document.getElementById('auth-section'),
   passwordAuthForm: document.getElementById('password-auth-form'),
   adminUsernameInput: document.getElementById('admin-username-input'),
@@ -58,6 +63,7 @@ const dom = {
   detailHeading: document.getElementById('detail-heading'),
   detailPrefix: document.getElementById('detail-prefix'),
   detailStatusBadge: document.getElementById('detail-status-badge'),
+  detailCopyKeyBtn: document.getElementById('detail-copy-key-btn'),
   detailEditBtn: document.getElementById('detail-edit-btn'),
   detailToggleEnabledBtn: document.getElementById('detail-toggle-enabled-btn'),
   detailCloseBtn: document.getElementById('detail-close-btn'),
@@ -76,6 +82,26 @@ const dom = {
   detailHistoryTbody: document.getElementById('detail-history-tbody'),
   detailLoadMoreWrap: document.getElementById('detail-load-more-wrap'),
   detailLoadMoreBtn: document.getElementById('detail-load-more-btn'),
+  liveRequestsCount: document.getElementById('live-requests-count'),
+  liveRequestsError: document.getElementById('live-requests-error'),
+  liveRequestsEmpty: document.getElementById('live-requests-empty'),
+  liveRequestsTableWrap: document.getElementById('live-requests-table-wrap'),
+  liveRequestsTbody: document.getElementById('live-requests-tbody'),
+  liveLoadMoreWrap: document.getElementById('live-load-more-wrap'),
+  liveLoadMoreBtn: document.getElementById('live-load-more-btn'),
+  ovActiveKeys: document.getElementById('ov-active-keys'),
+  ovUsers: document.getElementById('ov-users'),
+  ovRequests: document.getElementById('ov-requests'),
+  ovSpent: document.getElementById('ov-spent'),
+  navCountKeys: document.getElementById('nav-count-keys'),
+  navCountLive: document.getElementById('nav-count-live'),
+  navCountUsers: document.getElementById('nav-count-users'),
+  navCountModels: document.getElementById('nav-count-models'),
+  keysSearch: document.getElementById('keys-search'),
+  keysStatusFilter: document.getElementById('keys-status-filter'),
+  liveSearch: document.getElementById('live-search'),
+  usersSearch: document.getElementById('users-search'),
+  modelsSearch: document.getElementById('models-search'),
   keyModal: document.getElementById('key-modal'),
   keyModalForm: document.getElementById('key-modal-form'),
   keyModalTitle: document.getElementById('key-modal-title'),
@@ -117,8 +143,21 @@ const state = {
   editingUser: null,
   selectedKey: null,
   selectedHistory: [],
+  selectedHistoryTotal: 0,
   selectedNextCursor: null,
   loadingMoreHistory: false,
+  liveRequests: [],
+  liveTotal: 0,
+  liveNextCursor: null,
+  loadingMoreLive: false,
+  liveEnabled: true,
+  pollTimer: null,
+  pollInFlight: false,
+  liveFlashIds: new Set(),
+  liveFlashTimer: null,
+  detailFlashIds: new Set(),
+  detailFlashTimer: null,
+  activePage: 'keys',
   modalMode: 'create', // 'create' | 'edit'
   editingKey: null,
   pendingDisableKey: null,
@@ -195,7 +234,15 @@ function logout(reasonMessage = '', { notifyServer = false } = {}) {
   state.editingUser = null;
   state.selectedKey = null;
   state.selectedHistory = [];
+  state.selectedHistoryTotal = 0;
   state.selectedNextCursor = null;
+  state.liveRequests = [];
+  state.liveTotal = 0;
+  state.liveNextCursor = null;
+  clearTimeout(state.liveFlashTimer);
+  clearTimeout(state.detailFlashTimer);
+  state.liveFlashIds.clear();
+  state.detailFlashIds.clear();
   state.editingKey = null;
   state.pendingDisableKey = null;
   wipeOneTimeReveal();
@@ -211,6 +258,7 @@ function logout(reasonMessage = '', { notifyServer = false } = {}) {
   dom.usersTbody.innerHTML = '';
   dom.modelsTbody.innerHTML = '';
   dom.detailHistoryTbody.innerHTML = '';
+  if (dom.liveRequestsTbody) dom.liveRequestsTbody.innerHTML = '';
   dom.detailSection.classList.add('hidden');
   dom.workspace.classList.add('hidden');
   dom.logoutBtn.classList.add('hidden');
@@ -269,20 +317,71 @@ async function adminFetch(path, { method = 'GET', body, signal } = {}) {
   return payload;
 }
 
+const VALID_PAGES = new Set(['keys', 'live', 'users', 'models']);
+
+function pageFromHash() {
+  const h = (window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
+  return VALID_PAGES.has(h) ? h : 'keys';
+}
+
+function setActivePage(page, { updateHash = true } = {}) {
+  const next = VALID_PAGES.has(page) ? page : 'keys';
+  state.activePage = next;
+  document.querySelectorAll('.admin-nav-tab[data-page]').forEach((btn) => {
+    const active = btn.dataset.page === next;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll('.admin-page[data-page-view]').forEach((view) => {
+    view.classList.toggle('hidden', view.dataset.pageView !== next);
+  });
+  if (updateHash && window.location.hash !== `#${next}`) {
+    history.replaceState(null, '', `#${next}`);
+  }
+}
+
+function renderOverviewStats() {
+  const totalKeys = state.keys.length;
+  const activeKeys = state.keys.filter((k) => k.status === 'active').length;
+  const keyTotalReqs = state.keys.reduce((sum, k) => sum + Number(k.requestCount ?? 0), 0);
+  const totalReqs = Math.max(keyTotalReqs, state.liveTotal, state.liveRequests.length);
+  const totalSpent = state.keys.reduce((sum, k) => sum + Number(k.usedMicros ?? 0), 0);
+
+  if (dom.ovActiveKeys) dom.ovActiveKeys.textContent = `${formatInteger(activeKeys)} / ${formatInteger(totalKeys)}`;
+  if (dom.ovUsers) dom.ovUsers.textContent = formatInteger(state.users.length) ?? '0';
+  if (dom.ovRequests) dom.ovRequests.textContent = formatInteger(totalReqs) ?? '0';
+  if (dom.ovSpent) dom.ovSpent.textContent = formatMicrosToUsd(totalSpent) ?? '$0.00';
+
+  if (dom.navCountKeys) dom.navCountKeys.textContent = formatInteger(totalKeys) ?? '0';
+  if (dom.navCountLive) dom.navCountLive.textContent = formatInteger(totalReqs) ?? '0';
+  if (dom.navCountUsers) dom.navCountUsers.textContent = formatInteger(state.users.length) ?? '0';
+  if (dom.navCountModels) dom.navCountModels.textContent = formatInteger(state.models.length) ?? '0';
+}
+
 function renderModelsTable() {
-  dom.modelsCount.textContent = `${state.models.length} model`;
-  dom.modelsTbody.innerHTML = state.models
+  const query = (dom.modelsSearch?.value ?? '').trim().toLowerCase();
+  const filtered = query
+    ? state.models.filter((m) => m.id.toLowerCase().includes(query))
+    : state.models;
+  dom.modelsCount.textContent = query
+    ? `${filtered.length} / ${state.models.length} model`
+    : `${state.models.length} model`;
+  dom.modelsTbody.innerHTML = filtered
     .map(
-      (model) => `
+      (model) => {
+        const cachedRate = model.cachedInputMicrosPerMillion ?? Math.round((model.inputMicrosPerMillion ?? 0) * 0.25);
+        return `
       <tr>
         <td class="mono"><strong>${escapeHtml(model.id)}</strong></td>
         <td class="num">${escapeHtml(formatMicrosToUsd(model.inputMicrosPerMillion) ?? '—')}</td>
+        <td class="num"><strong style="color: #059669">${escapeHtml(formatMicrosToUsd(cachedRate) ?? '—')}</strong></td>
         <td class="num">${escapeHtml(formatMicrosToUsd(model.outputMicrosPerMillion) ?? '—')}</td>
         <td class="num">${escapeHtml(formatInteger(model.maxInputTokens) ?? '—')}</td>
         <td class="num">${escapeHtml(formatInteger(model.maxOutputTokens) ?? '—')}</td>
         <td class="mono">${escapeHtml(model.chatOutputLimitField ?? 'max_tokens')}</td>
       </tr>
-    `,
+    `;
+      },
     )
     .join('');
 }
@@ -300,7 +399,16 @@ function renderModelsAccessHtml(models) {
 }
 
 function renderKeysTable() {
-  if (state.keys.length === 0) {
+  const query = (dom.keysSearch?.value ?? '').trim().toLowerCase();
+  const statusFilter = dom.keysStatusFilter?.value ?? 'all';
+  const filtered = state.keys.filter((key) => {
+    if (statusFilter !== 'all' && key.status !== statusFilter) return false;
+    if (!query) return true;
+    const hay = `${key.name ?? ''} ${key.keyPrefix ?? ''} ${key.username ?? ''} ${key.id ?? ''}`.toLowerCase();
+    return hay.includes(query);
+  });
+
+  if (filtered.length === 0) {
     dom.keysEmpty.classList.remove('hidden');
     dom.keysTableWrap.classList.add('hidden');
     dom.keysTbody.innerHTML = '';
@@ -310,7 +418,7 @@ function renderKeysTable() {
   dom.keysEmpty.classList.add('hidden');
   dom.keysTableWrap.classList.remove('hidden');
 
-  dom.keysTbody.innerHTML = state.keys
+  dom.keysTbody.innerHTML = filtered
     .map((key) => {
       const statusMeta = getKeyStatusMeta(key.status);
       const selected = state.selectedKey && state.selectedKey.id === key.id;
@@ -318,11 +426,20 @@ function renderKeysTable() {
         key.expiresAt === null
           ? '<span>Không đặt hạn dùng</span>'
           : renderNullableValue(formatVnDateTime(key.expiresAt));
+      const ownerBadge = key.username
+        ? ` <span class="badge badge-neutral mono">@${escapeHtml(key.username)}</span>`
+        : '';
+      const copyBtn = key.canCopy
+        ? `<button type="button" class="btn-copy-inline" data-action="copy" data-id="${escapeHtml(key.id)}" title="Sao chép khóa đầy đủ">Sao chép</button>`
+        : '';
       return `
         <tr class="${selected ? 'selected-row' : ''}" data-key-id="${escapeHtml(key.id)}">
           <td>
-            <strong>${escapeHtml(key.name)}</strong>
-            <span class="sub-line mono">${escapeHtml(key.keyPrefix)}•••</span>
+            <div><strong>${escapeHtml(key.name)}</strong>${ownerBadge}</div>
+            <div class="key-prefix-row">
+              <span class="mono" style="color: var(--ink-secondary)">${escapeHtml(key.keyPrefix)}•••</span>
+              ${copyBtn}
+            </div>
           </td>
           <td><span class="badge badge-${statusMeta.tone}">${escapeHtml(statusMeta.label)}</span></td>
           <td class="num">
@@ -333,7 +450,7 @@ function renderKeysTable() {
               Còn lại: <strong>${escapeHtml(formatMicrosToUsd(key.remainingMicros))}</strong>
             </span>
           </td>
-          <td class="num">${escapeHtml(formatInteger(key.requestCount) ?? '0')}</td>
+          <td class="num"><strong>${escapeHtml(formatInteger(key.requestCount) ?? '0')}</strong></td>
           <td class="num">${expiresHtml}</td>
           <td>${escapeHtml(formatModelsSummary(key.models))}</td>
           <td>
@@ -353,7 +470,7 @@ function renderKeysTable() {
     .join('');
 }
 
-function renderRequestRow(item) {
+function renderRequestRow(item, { showKey = false, flashSet = null } = {}) {
   const statusMeta = getRequestStatusMeta(item.status);
   const created = formatVnDateTime(item.createdAt);
   const finished = formatVnDateTime(item.finishedAt);
@@ -363,17 +480,26 @@ function renderRequestRow(item) {
       : `<span class="mono">HTTP ${escapeHtml(item.httpStatus)}</span>`;
   const inputTokens = formatInteger(item.inputTokens);
   const outputTokens = formatInteger(item.outputTokens);
+  const cachedTokens = item.cachedTokens > 0 ? formatInteger(item.cachedTokens) : null;
   const inputCost = formatMicrosToUsd(item.inputCostMicros);
   const outputCost = formatMicrosToUsd(item.outputCostMicros);
   const charged = formatMicrosToUsd(item.chargedMicros);
   const capped = isChargeCappedByReservation(item);
+  const flashClass = flashSet && flashSet.has(item.id) ? 'row-new' : '';
+  const keyCol = showKey
+    ? `<td>
+        <button type="button" class="key-link-btn" data-open-key-id="${escapeHtml(item.keyId)}">${escapeHtml(item.keyName ?? 'Không rõ')}</button>
+        <span class="sub-line mono">${escapeHtml(item.keyPrefix ?? '')}•••${item.username ? ` · @${escapeHtml(item.username)}` : ''}</span>
+      </td>`
+    : '';
 
   return `
-    <tr>
+    <tr class="${flashClass}">
       <td class="num">
         <div>${renderNullableValue(created)}</div>
         <span class="sub-line">Xong: ${renderNullableValue(finished)}</span>
       </td>
+      ${keyCol}
       <td>
         <div class="mono">${escapeHtml(item.model)}</div>
         <span class="sub-line mono">${escapeHtml(item.endpoint)}</span>
@@ -388,6 +514,7 @@ function renderRequestRow(item) {
       <td class="num">
         <div>${renderNullableValue(inputCost)}</div>
         <span class="sub-line">${inputTokens !== null ? `${escapeHtml(inputTokens)} token` : renderNullableValue(null)}</span>
+        ${cachedTokens ? `<span class="sub-line" style="color: #059669; font-weight: 700">Cache: ${escapeHtml(cachedTokens)} tok (-75%)</span>` : ''}
       </td>
       <td class="num">
         <div>${renderNullableValue(outputCost)}</div>
@@ -412,12 +539,16 @@ function renderSelectedDetail() {
     return;
   }
   dom.detailSection.classList.remove('hidden');
-  dom.detailHeading.textContent = `Chi tiết khóa: ${key.name}`;
+  dom.detailHeading.textContent = `Chi tiết khóa: ${key.name}${key.username ? ` (@${key.username})` : ''}`;
   dom.detailPrefix.textContent = `${key.keyPrefix}••• (ID: ${key.id})`;
 
   const statusMeta = getKeyStatusMeta(key.status);
   dom.detailStatusBadge.textContent = statusMeta.label;
   dom.detailStatusBadge.className = `badge badge-${statusMeta.tone}`;
+
+  if (dom.detailCopyKeyBtn) {
+    dom.detailCopyKeyBtn.classList.toggle('hidden', !key.canCopy);
+  }
 
   dom.detailToggleEnabledBtn.textContent = key.enabled ? 'Vô hiệu hóa khóa' : 'Bật lại khóa';
   dom.detailToggleEnabledBtn.className = key.enabled
@@ -437,7 +568,8 @@ function renderSelectedDetail() {
       : renderNullableValue(formatVnDateTime(key.expiresAt));
   dom.detailModels.innerHTML = renderModelsAccessHtml(key.models);
 
-  dom.detailHistoryCount.textContent = `${state.selectedHistory.length} mục`;
+  const historyTotal = Math.max(state.selectedHistory.length, state.selectedHistoryTotal, Number(key.requestCount ?? 0));
+  dom.detailHistoryCount.textContent = formatLoadedCount(state.selectedHistory.length, historyTotal);
   if (state.selectedHistory.length === 0) {
     dom.detailHistoryEmpty.classList.remove('hidden');
     dom.detailHistoryTableWrap.classList.add('hidden');
@@ -445,7 +577,9 @@ function renderSelectedDetail() {
   } else {
     dom.detailHistoryEmpty.classList.add('hidden');
     dom.detailHistoryTableWrap.classList.remove('hidden');
-    dom.detailHistoryTbody.innerHTML = state.selectedHistory.map(renderRequestRow).join('');
+    dom.detailHistoryTbody.innerHTML = state.selectedHistory
+      .map((item) => renderRequestRow(item, { showKey: false, flashSet: state.detailFlashIds }))
+      .join('');
   }
 
   if (state.selectedNextCursor !== null) {
@@ -457,9 +591,80 @@ function renderSelectedDetail() {
   }
 }
 
+function renderLiveRequests() {
+  if (!dom.liveRequestsTbody) return;
+  const query = (dom.liveSearch?.value ?? '').trim().toLowerCase();
+  const filtered = query
+    ? state.liveRequests.filter((item) => {
+        const hay = `${item.keyName ?? ''} ${item.keyPrefix ?? ''} ${item.username ?? ''} ${item.model ?? ''} ${item.endpoint ?? ''} ${item.status ?? ''}`.toLowerCase();
+        return hay.includes(query);
+      })
+    : state.liveRequests;
+
+  const keyTotalReqs = state.keys.reduce((sum, k) => sum + Number(k.requestCount ?? 0), 0);
+  const totalReqs = Math.max(keyTotalReqs, state.liveTotal, state.liveRequests.length);
+  dom.liveRequestsCount.textContent = query
+    ? `Lọc ${formatInteger(filtered.length)} / ${formatInteger(state.liveRequests.length)} mục đã tải (tổng ${formatInteger(totalReqs)})`
+    : formatLoadedCount(state.liveRequests.length, totalReqs);
+  if (filtered.length === 0) {
+    dom.liveRequestsEmpty.classList.remove('hidden');
+    dom.liveRequestsTableWrap.classList.add('hidden');
+    dom.liveRequestsTbody.innerHTML = '';
+  } else {
+    dom.liveRequestsEmpty.classList.add('hidden');
+    dom.liveRequestsTableWrap.classList.remove('hidden');
+    dom.liveRequestsTbody.innerHTML = filtered
+      .map((item) => renderRequestRow(item, { showKey: true, flashSet: state.liveFlashIds }))
+      .join('');
+  }
+
+  if (state.liveNextCursor !== null) {
+    dom.liveLoadMoreWrap.classList.remove('hidden');
+    dom.liveLoadMoreBtn.disabled = state.loadingMoreLive;
+    dom.liveLoadMoreBtn.textContent = state.loadingMoreLive ? 'Đang tải thêm...' : 'Tải thêm';
+  } else {
+    dom.liveLoadMoreWrap.classList.add('hidden');
+  }
+}
+
+async function copyAdminKeySecret(keyId, triggerBtn) {
+  if (!keyId) return;
+  const originalText = triggerBtn ? triggerBtn.textContent : '';
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.textContent = 'Đang lấy...';
+  }
+  try {
+    const data = await adminFetch(`/admin/v1/keys/${encodeURIComponent(keyId)}/secret`);
+    if (!data?.key) throw new Error('Không lấy được khóa.');
+    await navigator.clipboard.writeText(data.key);
+    if (triggerBtn) {
+      triggerBtn.textContent = 'Đã chép ✓';
+      setTimeout(() => {
+        triggerBtn.textContent = originalText;
+      }, 1500);
+    }
+    announce('Đã sao chép khóa API vào clipboard.');
+  } catch (error) {
+    if (error?.name !== 'AbortError' && state.authenticated) {
+      setGlobalFeedback(error.message ?? 'Không thể sao chép khóa này.', 'warning');
+    }
+    if (triggerBtn) triggerBtn.textContent = originalText;
+  } finally {
+    if (triggerBtn) triggerBtn.disabled = false;
+  }
+}
+
 function renderUsersTable() {
-  dom.usersCount.textContent = `${state.users.length} tài khoản`;
-  if (state.users.length === 0) {
+  const query = (dom.usersSearch?.value ?? '').trim().toLowerCase();
+  const filtered = query
+    ? state.users.filter((u) => `${u.username ?? ''} ${u.email ?? ''}`.toLowerCase().includes(query))
+    : state.users;
+
+  dom.usersCount.textContent = query
+    ? `${filtered.length} / ${state.users.length} tài khoản`
+    : `${state.users.length} tài khoản`;
+  if (filtered.length === 0) {
     dom.usersEmpty.classList.remove('hidden');
     dom.usersTableWrap.classList.add('hidden');
     dom.usersTbody.innerHTML = '';
@@ -467,7 +672,7 @@ function renderUsersTable() {
   }
   dom.usersEmpty.classList.add('hidden');
   dom.usersTableWrap.classList.remove('hidden');
-  dom.usersTbody.innerHTML = state.users
+  dom.usersTbody.innerHTML = filtered
     .map((u) => {
       const remaining = u.remainingMicros ?? Math.max(0, u.quotaMicros - u.usedMicros - u.reservedMicros);
       return `
@@ -509,19 +714,25 @@ async function loadOverview({ keepSelected = true } = {}) {
   const controller = new AbortController();
   state.controller = controller;
 
-  const [modelsRes, keysRes, usersRes] = await Promise.all([
+  const [modelsRes, keysRes, usersRes, liveRes] = await Promise.all([
     adminFetch('/admin/v1/models', { signal: controller.signal }),
     adminFetch('/admin/v1/keys', { signal: controller.signal }),
     adminFetch('/admin/v1/users', { signal: controller.signal }).catch(() => ({ items: [] })),
+    adminFetch(`/admin/v1/requests?limit=${PAGE_LIMIT}`, { signal: controller.signal }).catch(() => ({ items: [], nextCursor: null })),
   ]);
   if (currentGen !== state.generation) return;
 
   state.models = Array.isArray(modelsRes?.items) ? modelsRes.items : [];
   state.keys = Array.isArray(keysRes?.items) ? keysRes.items : [];
   state.users = Array.isArray(usersRes?.items) ? usersRes.items : [];
+  state.liveRequests = Array.isArray(liveRes?.items) ? liveRes.items : [];
+  state.liveTotal = Number.isSafeInteger(liveRes?.total) ? liveRes.total : state.liveRequests.length;
+  state.liveNextCursor = liveRes?.nextCursor ?? null;
+  renderOverviewStats();
   renderModelsTable();
   renderKeysTable();
   renderUsersTable();
+  renderLiveRequests();
 
   if (keepSelected && state.selectedKey) {
     const stillExists = state.keys.some((item) => item.id === state.selectedKey.id);
@@ -530,8 +741,37 @@ async function loadOverview({ keepSelected = true } = {}) {
     } else {
       state.selectedKey = null;
       state.selectedHistory = [];
+      state.selectedHistoryTotal = 0;
       state.selectedNextCursor = null;
       renderSelectedDetail();
+    }
+  }
+}
+
+async function loadMoreLiveRequests() {
+  if (state.liveNextCursor === null || state.loadingMoreLive) return;
+  const currentGen = state.generation;
+  const cursor = state.liveNextCursor;
+  state.loadingMoreLive = true;
+  dom.liveRequestsError.classList.add('hidden');
+  renderLiveRequests();
+
+  try {
+    const page = await adminFetch(`/admin/v1/requests?limit=${PAGE_LIMIT}&before=${encodeURIComponent(cursor)}`);
+    if (currentGen !== state.generation) return;
+    const incoming = Array.isArray(page?.items) ? page.items : [];
+    state.liveRequests = appendRequestPage(state.liveRequests, incoming);
+    if (Number.isSafeInteger(page?.total)) state.liveTotal = page.total;
+    state.liveNextCursor = page?.nextCursor ?? null;
+  } catch (error) {
+    if (error?.name === 'AbortError' || !state.authenticated) return;
+    dom.liveRequestsError.textContent = error.message ?? 'Không thể tải thêm lịch sử request.';
+    dom.liveRequestsError.classList.remove('hidden');
+  } finally {
+    if (currentGen === state.generation) {
+      state.loadingMoreLive = false;
+      renderOverviewStats();
+      renderLiveRequests();
     }
   }
 }
@@ -548,6 +788,7 @@ async function openKeyDetail(keyId) {
     if (currentGen !== state.generation) return;
     state.selectedKey = detail;
     state.selectedHistory = Array.isArray(history?.items) ? history.items : [];
+    state.selectedHistoryTotal = Number.isSafeInteger(history?.total) ? history.total : state.selectedHistory.length;
     state.selectedNextCursor = history?.nextCursor ?? null;
     renderKeysTable();
     renderSelectedDetail();
@@ -572,7 +813,8 @@ async function loadMoreDetailHistory() {
     );
     if (currentGen !== state.generation || state.selectedKey?.id !== keyId) return;
     const incoming = Array.isArray(page?.items) ? page.items : [];
-    state.selectedHistory = [...state.selectedHistory, ...incoming];
+    state.selectedHistory = appendRequestPage(state.selectedHistory, incoming);
+    if (Number.isSafeInteger(page?.total)) state.selectedHistoryTotal = page.total;
     state.selectedNextCursor = page?.nextCursor ?? null;
   } catch (error) {
     if (error?.name === 'AbortError' || !state.authenticated) return;
@@ -631,6 +873,7 @@ function openCreateKeyModal() {
   dom.keyModalTitle.textContent = 'Tạo khóa API mới';
   dom.keyModalSubmit.textContent = 'Tạo khóa';
   dom.keyNameInput.value = '';
+  dom.keyQuotaInput.disabled = false;
   dom.keyQuotaInput.value = '5';
   dom.keyQuotaHint.textContent = '1 USD = 1.000.000 micros. Nhập chính xác tới 0.000001 USD.';
   dom.keyNoExpiry.checked = true;
@@ -651,8 +894,14 @@ function openEditKeyModal(key) {
   dom.keyModalSubmit.textContent = 'Lưu thay đổi';
   dom.keyNameInput.value = key.name;
   dom.keyQuotaInput.value = formatMicrosInputValue(key.quotaMicros);
-  const floorMicros = key.usedMicros + key.reservedMicros;
-  dom.keyQuotaHint.textContent = `Tối thiểu hiện tại (đã dùng + đang giữ chỗ): ${formatMicrosToUsd(floorMicros)}.`;
+  if (key.sharedWallet) {
+    dom.keyQuotaInput.disabled = true;
+    dom.keyQuotaHint.textContent = `Khóa dùng chung ví tài khoản${key.username ? ` @${key.username}` : ''}. Để nạp hoặc đổi hạn mức USD, hãy vào tab Tài khoản → Sửa ví.`;
+  } else {
+    dom.keyQuotaInput.disabled = false;
+    const floorMicros = key.usedMicros + key.reservedMicros;
+    dom.keyQuotaHint.textContent = `Tối thiểu hiện tại (đã dùng + đang giữ chỗ): ${formatMicrosToUsd(floorMicros)}.`;
+  }
 
   if (key.expiresAt === null) {
     dom.keyNoExpiry.checked = true;
@@ -667,7 +916,7 @@ function openEditKeyModal(key) {
   populateModelChecklist(key.models);
   setModelScope(key.models === null ? 'all' : 'custom');
   dom.keyEnabledField.classList.remove('hidden');
-  dom.keyEnabledInput.checked = Boolean(key.enabled);
+  dom.keyEnabledInput.checked = Boolean(key.keyEnabled ?? key.enabled);
   showKeyModalError('');
   dom.keyModal.showModal();
   dom.keyNameInput.focus();
@@ -693,11 +942,15 @@ async function handleKeyModalSubmit(event) {
     return;
   }
 
-  const parsedQuota = parseUsdToMicros(dom.keyQuotaInput.value);
-  if (!parsedQuota.ok) {
-    showKeyModalError(parsedQuota.error);
-    dom.keyQuotaInput.focus();
-    return;
+  const isEditingSharedWallet = state.modalMode === 'edit' && Boolean(state.editingKey?.sharedWallet);
+  let parsedQuota = null;
+  if (!isEditingSharedWallet) {
+    parsedQuota = parseUsdToMicros(dom.keyQuotaInput.value);
+    if (!parsedQuota.ok) {
+      showKeyModalError(parsedQuota.error);
+      dom.keyQuotaInput.focus();
+      return;
+    }
   }
 
   let expiresAt = null;
@@ -746,11 +999,12 @@ async function handleKeyModalSubmit(event) {
       const orig = state.editingKey;
       const patch = {};
       if (trimmedName !== orig.name) patch.name = trimmedName;
-      if (parsedQuota.micros !== orig.quotaMicros) patch.quotaMicros = parsedQuota.micros;
+      if (!isEditingSharedWallet && parsedQuota.micros !== orig.quotaMicros) patch.quotaMicros = parsedQuota.micros;
       if (expiresAt !== orig.expiresAt) patch.expiresAt = expiresAt;
       if (!sameModels(models, orig.models)) patch.models = models;
       const enabledVal = dom.keyEnabledInput.checked;
-      if (enabledVal !== orig.enabled) patch.enabled = enabledVal;
+      const origKeyEnabled = Boolean(orig.keyEnabled ?? orig.enabled);
+      if (enabledVal !== origKeyEnabled) patch.enabled = enabledVal;
 
       if (Object.keys(patch).length === 0) {
         closeDialogSafe(dom.keyModal);
@@ -932,11 +1186,36 @@ dom.keysTbody.addEventListener('click', (event) => {
   const id = btn.dataset.id;
   const key = state.keys.find((item) => item.id === id);
   if (!key) return;
-  if (btn.dataset.action === 'view') openKeyDetail(id);
+  if (btn.dataset.action === 'copy') copyAdminKeySecret(id, btn);
+  else if (btn.dataset.action === 'view') openKeyDetail(id);
   else if (btn.dataset.action === 'edit') openEditKeyModal(key);
   else if (btn.dataset.action === 'disable') openDisableModal(key);
   else if (btn.dataset.action === 'enable') enableKey(key);
 });
+
+if (dom.detailCopyKeyBtn) {
+  dom.detailCopyKeyBtn.addEventListener('click', () => {
+    if (state.selectedKey) copyAdminKeySecret(state.selectedKey.id, dom.detailCopyKeyBtn);
+  });
+}
+
+if (dom.liveRequestsTbody) {
+  dom.liveRequestsTbody.addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-open-key-id]');
+    if (!btn) return;
+    const keyId = btn.dataset.openKeyId;
+    if (keyId) {
+      setActivePage('keys');
+      openKeyDetail(keyId).then(() => {
+        dom.detailSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+  });
+}
+
+if (dom.liveLoadMoreBtn) {
+  dom.liveLoadMoreBtn.addEventListener('click', loadMoreLiveRequests);
+}
 
 dom.detailEditBtn.addEventListener('click', () => {
   if (state.selectedKey) openEditKeyModal(state.selectedKey);
@@ -951,6 +1230,7 @@ dom.detailToggleEnabledBtn.addEventListener('click', () => {
 dom.detailCloseBtn.addEventListener('click', () => {
   state.selectedKey = null;
   state.selectedHistory = [];
+  state.selectedHistoryTotal = 0;
   state.selectedNextCursor = null;
   renderKeysTable();
   renderSelectedDetail();
@@ -1055,6 +1335,126 @@ dom.userModalForm.addEventListener('submit', async (event) => {
 
 dom.userModalCancel.addEventListener('click', () => closeDialogSafe(dom.userModal));
 dom.userModalCloseX.addEventListener('click', () => closeDialogSafe(dom.userModal));
+
+function updateAdminLiveUi() {
+  if (!dom.adminLiveToggle) return;
+  dom.adminLiveToggle.setAttribute('aria-pressed', String(state.liveEnabled));
+  dom.adminLiveToggle.innerHTML = state.liveEnabled
+    ? '<span class="live-dot-pulse" aria-hidden="true"></span><span>Trực tiếp (3s)</span>'
+    : '<span class="live-dot-paused" aria-hidden="true"></span><span>Tạm dừng</span>';
+}
+
+async function silentPollAdmin() {
+  if (!state.authenticated || !state.liveEnabled || state.pollInFlight || document.hidden) return;
+  if (dom.keyModal.open || dom.userModal.open || dom.disableModal.open || dom.revealModal.open) return;
+
+  const currentGen = state.generation;
+  const selectedId = state.selectedKey?.id ?? null;
+  const pollLive = !state.loadingMoreLive;
+  const pollDetailHist = Boolean(selectedId) && !state.loadingMoreHistory;
+  state.pollInFlight = true;
+  try {
+    const [keysRes, usersRes, liveRes, detailRes, detailHistRes] = await Promise.all([
+      adminFetch('/admin/v1/keys'),
+      adminFetch('/admin/v1/users').catch(() => null),
+      pollLive ? adminFetch(`/admin/v1/requests?limit=${PAGE_LIMIT}`).catch(() => null) : Promise.resolve(null),
+      selectedId ? adminFetch(`/admin/v1/keys/${encodeURIComponent(selectedId)}`).catch(() => null) : Promise.resolve(null),
+      pollDetailHist
+        ? adminFetch(`/admin/v1/keys/${encodeURIComponent(selectedId)}/requests?limit=${PAGE_LIMIT}`).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    if (currentGen !== state.generation || !state.authenticated) return;
+
+    if (Array.isArray(keysRes?.items)) {
+      state.keys = keysRes.items;
+      renderKeysTable();
+    }
+    if (Array.isArray(usersRes?.items)) {
+      state.users = usersRes.items;
+      renderUsersTable();
+    }
+    if (pollLive && !state.loadingMoreLive && Array.isArray(liveRes?.items)) {
+      const prevTotal = state.liveTotal;
+      const nextTotal = Number.isSafeInteger(liveRes.total) ? liveRes.total : prevTotal;
+      const { merged, nextCursor, changed } = mergeRequestPages(state.liveRequests, liveRes.items, {
+        pageLimit: PAGE_LIMIT,
+        incomingCursor: liveRes.nextCursor ?? null,
+        currentCursor: state.liveNextCursor,
+      });
+      const updated =
+        changed.size > 0
+        || merged.length !== state.liveRequests.length
+        || nextCursor !== state.liveNextCursor
+        || nextTotal !== prevTotal;
+      if (updated) {
+        state.liveRequests = merged;
+        state.liveTotal = nextTotal;
+        state.liveNextCursor = nextCursor;
+        state.liveFlashIds = changed;
+        renderLiveRequests();
+        clearTimeout(state.liveFlashTimer);
+        state.liveFlashTimer = setTimeout(() => {
+          state.liveFlashIds.clear();
+        }, 1700);
+      }
+    }
+    renderOverviewStats();
+
+    if (selectedId && state.selectedKey?.id === selectedId && detailRes) {
+      state.selectedKey = detailRes;
+      if (pollDetailHist && !state.loadingMoreHistory && Array.isArray(detailHistRes?.items)) {
+        const { merged, nextCursor, changed } = mergeRequestPages(state.selectedHistory, detailHistRes.items, {
+          pageLimit: PAGE_LIMIT,
+          incomingCursor: detailHistRes.nextCursor ?? null,
+          currentCursor: state.selectedNextCursor,
+        });
+        state.selectedHistory = merged;
+        if (Number.isSafeInteger(detailHistRes.total)) state.selectedHistoryTotal = detailHistRes.total;
+        state.selectedNextCursor = nextCursor;
+        state.detailFlashIds = changed;
+        clearTimeout(state.detailFlashTimer);
+        state.detailFlashTimer = setTimeout(() => {
+          state.detailFlashIds.clear();
+        }, 1700);
+      }
+      renderSelectedDetail();
+    }
+  } catch {
+    // Ignore transient background errors
+  } finally {
+    state.pollInFlight = false;
+  }
+}
+
+if (dom.adminLiveToggle) {
+  dom.adminLiveToggle.addEventListener('click', () => {
+    state.liveEnabled = !state.liveEnabled;
+    updateAdminLiveUi();
+    if (state.liveEnabled) silentPollAdmin();
+  });
+}
+
+document.querySelectorAll('.admin-nav-tab[data-page]').forEach((tab) => {
+  tab.addEventListener('click', () => setActivePage(tab.dataset.page));
+});
+
+window.addEventListener('hashchange', () => {
+  setActivePage(pageFromHash(), { updateHash: false });
+});
+
+if (dom.keysSearch) dom.keysSearch.addEventListener('input', renderKeysTable);
+if (dom.keysStatusFilter) dom.keysStatusFilter.addEventListener('change', renderKeysTable);
+if (dom.liveSearch) dom.liveSearch.addEventListener('input', renderLiveRequests);
+if (dom.usersSearch) dom.usersSearch.addEventListener('input', renderUsersTable);
+if (dom.modelsSearch) dom.modelsSearch.addEventListener('input', renderModelsTable);
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.liveEnabled && state.authenticated) silentPollAdmin();
+});
+
+setActivePage(pageFromHash(), { updateHash: false });
+updateAdminLiveUi();
+state.pollTimer = setInterval(silentPollAdmin, LIVE_INTERVAL_MS);
 
 // Resume active admin cookie session automatically if already signed in
 loadOverview({ keepSelected: false })

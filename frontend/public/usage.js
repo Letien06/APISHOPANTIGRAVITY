@@ -1,16 +1,19 @@
 import {
+  appendRequestPage,
   escapeHtml,
   formatInteger,
+  formatLoadedCount,
   formatMicrosToUsd,
   formatVnDateTime,
   getKeyStatusMeta,
   getRequestStatusMeta,
   isChargeCappedByReservation,
+  mergeRequestPages,
   renderNullableValue,
   translateApiError,
 } from '/usage/assets/format.js';
 
-const PAGE_LIMIT = 25;
+const PAGE_LIMIT = 50;
 
 const dom = {
   form: document.getElementById('key-form'),
@@ -81,6 +84,7 @@ const state = {
   controller: null,
   summary: null,
   items: [],
+  historyTotal: 0,
   nextCursor: null,
   loading: false,
   loadingMore: false,
@@ -90,6 +94,7 @@ const state = {
   pollTimer: null,
   pollInFlight: false,
   flashIds: new Set(),
+  flashTimer: null,
 };
 
 function announce(message) {
@@ -157,9 +162,12 @@ function clearHistoryError() {
 function resetDataView() {
   state.summary = null;
   state.items = [];
+  state.historyTotal = 0;
   state.nextCursor = null;
   state.loadingMore = false;
   state.lastHistoryCursorAttempt = null;
+  clearTimeout(state.flashTimer);
+  state.flashIds.clear();
   dom.summarySection.classList.add('hidden');
   dom.historySection.classList.add('hidden');
   dom.historyTbody.innerHTML = '';
@@ -331,12 +339,18 @@ function renderSummary(summary) {
   dom.kpiRemaining.textContent = formatMicrosToUsd(summary.remainingMicros) ?? 'Chưa có dữ liệu';
 
   const quota = summary.quotaMicros;
+  const effectiveUsed = summary.sharedWallet
+    ? (summary.accountUsedMicros ?? summary.usedMicros)
+    : summary.usedMicros;
+  const effectiveReserved = summary.sharedWallet
+    ? (summary.accountReservedMicros ?? summary.reservedMicros)
+    : summary.reservedMicros;
   let usedPct = 0;
   let reservedPct = 0;
   if (quota > 0) {
-    usedPct = Math.min(100, (summary.usedMicros / quota) * 100);
-    reservedPct = Math.min(100 - usedPct, (summary.reservedMicros / quota) * 100);
-  } else if (summary.usedMicros > 0 || summary.reservedMicros > 0) {
+    usedPct = Math.min(100, (effectiveUsed / quota) * 100);
+    reservedPct = Math.min(100 - usedPct, (effectiveReserved / quota) * 100);
+  } else if (effectiveUsed > 0 || effectiveReserved > 0) {
     usedPct = 100;
   }
   const totalPct = Math.min(100, Math.round((usedPct + reservedPct) * 10) / 10);
@@ -364,6 +378,7 @@ function renderRequestRowDesktop(item) {
       : `<span class="mono">HTTP ${escapeHtml(item.httpStatus)}</span>`;
   const inputTokens = formatInteger(item.inputTokens);
   const outputTokens = formatInteger(item.outputTokens);
+  const cachedTokens = item.cachedTokens > 0 ? formatInteger(item.cachedTokens) : null;
   const inputCost = formatMicrosToUsd(item.inputCostMicros);
   const outputCost = formatMicrosToUsd(item.outputCostMicros);
   const charged = formatMicrosToUsd(item.chargedMicros);
@@ -389,6 +404,7 @@ function renderRequestRowDesktop(item) {
       <td class="num">
         <div>${renderNullableValue(inputCost)}</div>
         <span class="sub-line">${inputTokens !== null ? `${escapeHtml(inputTokens)} token` : renderNullableValue(null)}</span>
+        ${cachedTokens ? `<span class="sub-line" style="color: #059669; font-weight: 700">Cache: ${escapeHtml(cachedTokens)} tok (-75%)</span>` : ''}
       </td>
       <td class="num">
         <div>${renderNullableValue(outputCost)}</div>
@@ -412,6 +428,7 @@ function renderRequestCardMobile(item) {
   const finished = formatVnDateTime(item.finishedAt);
   const inputTokens = formatInteger(item.inputTokens);
   const outputTokens = formatInteger(item.outputTokens);
+  const cachedTokens = item.cachedTokens > 0 ? formatInteger(item.cachedTokens) : null;
   const inputCost = formatMicrosToUsd(item.inputCostMicros);
   const outputCost = formatMicrosToUsd(item.outputCostMicros);
   const charged = formatMicrosToUsd(item.chargedMicros);
@@ -449,7 +466,7 @@ function renderRequestCardMobile(item) {
         <div class="req-details-body num">
           <div>Endpoint: <span class="mono">${escapeHtml(item.endpoint)}</span></div>
           <div>Hoàn tất (UTC+7): ${renderNullableValue(finished)}</div>
-          <div>Đầu vào: ${renderNullableValue(inputCost)} (${inputTokens !== null ? `${escapeHtml(inputTokens)} token` : renderNullableValue(null)})</div>
+          <div>Đầu vào: ${renderNullableValue(inputCost)} (${inputTokens !== null ? `${escapeHtml(inputTokens)} token` : renderNullableValue(null)}${cachedTokens ? ` · Cache: ${escapeHtml(cachedTokens)} tok` : ''})</div>
           <div>Đầu ra: ${renderNullableValue(outputCost)} (${outputTokens !== null ? `${escapeHtml(outputTokens)} token` : renderNullableValue(null)})</div>
         </div>
       </details>
@@ -459,7 +476,8 @@ function renderRequestCardMobile(item) {
 
 function renderHistory() {
   dom.historySection.classList.remove('hidden');
-  dom.historyCount.textContent = `${state.items.length} mục`;
+  const total = Math.max(state.items.length, state.historyTotal, Number(state.summary?.requestCount ?? 0));
+  dom.historyCount.textContent = formatLoadedCount(state.items.length, total);
 
   if (state.items.length === 0) {
     dom.historyEmpty.classList.remove('hidden');
@@ -515,6 +533,7 @@ async function loadAccountKey(keyId) {
     if (currentGen !== state.generation) return;
     state.summary = summary;
     state.items = Array.isArray(history.items) ? history.items : [];
+    state.historyTotal = Number.isSafeInteger(history.total) ? history.total : state.items.length;
     state.nextCursor = history.nextCursor ?? null;
     renderSummary(summary);
     renderHistory();
@@ -569,6 +588,7 @@ async function loadUsage(apiKey) {
     if (currentGen !== state.generation) return;
     state.summary = summary;
     state.items = Array.isArray(history.items) ? history.items : [];
+    state.historyTotal = Number.isSafeInteger(history.total) ? history.total : state.items.length;
     state.nextCursor = history.nextCursor ?? null;
     renderSummary(summary);
     renderHistory();
@@ -613,7 +633,8 @@ async function loadMoreHistory() {
           );
     if (currentGen !== state.generation) return;
     const incoming = Array.isArray(page.items) ? page.items : [];
-    state.items = [...state.items, ...incoming];
+    state.items = appendRequestPage(state.items, incoming);
+    if (Number.isSafeInteger(page.total)) state.historyTotal = page.total;
     state.nextCursor = page.nextCursor ?? null;
     state.lastHistoryCursorAttempt = null;
     announce(`Đã tải thêm ${incoming.length} yêu cầu.`);
@@ -806,22 +827,6 @@ function updateUsageLiveUi() {
     : '<span class="live-dot-paused" aria-hidden="true"></span><span>Tạm dừng</span>';
 }
 
-function mergeUsageHistory(existing, incoming, incomingCursor) {
-  const prevById = new Map(existing.map((item) => [item.id, item]));
-  const incomingIds = new Set(incoming.map((item) => item.id));
-  const changed = new Set();
-  for (const item of incoming) {
-    const prev = prevById.get(item.id);
-    if (!prev || prev.status !== item.status || prev.chargedMicros !== item.chargedMicros) {
-      changed.add(item.id);
-    }
-  }
-  const olderTail = existing.filter((item) => !incomingIds.has(item.id));
-  const merged = [...incoming, ...olderTail].sort((a, b) => b.id - a.id);
-  const nextCursor = existing.length <= PAGE_LIMIT ? (incomingCursor ?? null) : state.nextCursor;
-  return { merged, nextCursor, changed };
-}
-
 async function silentPollUsage() {
   if (!state.liveEnabled || !hasActiveTarget() || !state.summary || state.loading || state.loadingMore || state.pollInFlight || document.hidden) {
     return;
@@ -848,28 +853,50 @@ async function silentPollUsage() {
 
     const prevSummary = state.summary;
     state.summary = summary;
-    const { merged, nextCursor, changed } = mergeUsageHistory(
+    const prevTotal = state.historyTotal;
+    const nextTotal = Number.isSafeInteger(history.total) ? history.total : prevTotal;
+    const { merged, nextCursor, changed } = mergeRequestPages(
       state.items,
       Array.isArray(history.items) ? history.items : [],
-      history.nextCursor ?? null,
+      {
+        pageLimit: PAGE_LIMIT,
+        incomingCursor: history.nextCursor ?? null,
+        currentCursor: state.nextCursor,
+      },
     );
     const summaryChanged =
       !prevSummary
       || prevSummary.usedMicros !== summary.usedMicros
       || prevSummary.reservedMicros !== summary.reservedMicros
+      || prevSummary.accountUsedMicros !== summary.accountUsedMicros
+      || prevSummary.accountReservedMicros !== summary.accountReservedMicros
       || prevSummary.remainingMicros !== summary.remainingMicros
       || prevSummary.quotaMicros !== summary.quotaMicros
       || prevSummary.requestCount !== summary.requestCount
       || prevSummary.status !== summary.status;
     if (summaryChanged) {
       renderSummary(summary);
+      if (mode === 'account' && prevSummary?.status !== summary.status) {
+        const idx = state.accountKeys.findIndex((k) => k.id === keyId);
+        if (idx >= 0) {
+          state.accountKeys[idx] = { ...state.accountKeys[idx], status: summary.status };
+          renderAccountKeyPills();
+        }
+      }
     }
-    if (changed.size > 0 || merged.length !== state.items.length) {
+    const historyChanged =
+      changed.size > 0
+      || merged.length !== state.items.length
+      || nextCursor !== state.nextCursor
+      || nextTotal !== prevTotal;
+    if (historyChanged) {
       state.items = merged;
+      state.historyTotal = nextTotal;
       state.nextCursor = nextCursor;
       state.flashIds = changed;
       renderHistory();
-      setTimeout(() => {
+      clearTimeout(state.flashTimer);
+      state.flashTimer = setTimeout(() => {
         state.flashIds.clear();
       }, 1700);
     }

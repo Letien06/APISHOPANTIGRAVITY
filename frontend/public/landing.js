@@ -147,9 +147,10 @@ function renderPassportTicket() {
     )
     .join('');
 
+  const cachedRate = current.cachedInputMicrosPerMillion ?? Math.round((current.inputMicrosPerMillion ?? 0) * 0.25);
   dom.ticketSelectedModel.textContent = current.id;
   dom.ticketModelPrice.textContent =
-    `Đầu vào: ${formatMicrosToUsd(current.inputMicrosPerMillion)}/1M · Đầu ra: ${formatMicrosToUsd(current.outputMicrosPerMillion)}/1M`;
+    `Vào: ${formatMicrosToUsd(current.inputMicrosPerMillion)} · Đệm (25%): ${formatMicrosToUsd(cachedRate)} · Ra: ${formatMicrosToUsd(current.outputMicrosPerMillion)} / 1M`;
   dom.ticketModelLimits.textContent = `Max out: ${formatInteger(current.maxOutputTokens)} tok`;
   renderCodeWindow();
 }
@@ -168,34 +169,40 @@ function renderLiveBarAndModal() {
 
   if (dom.modelsCatalogSummary) {
     dom.modelsCatalogSummary.innerHTML =
-      `Hiện có <strong>${models.length} model Google Gemini</strong> đang hoạt động — bấm <strong>Sao chép ID</strong> để dán vào IDE/SDK.`;
+      `Hiện có <strong>${models.length} model</strong> đang hoạt động (hỗ trợ <strong>Prompt Cache giảm 75%</strong> giá đầu vào) — bấm <strong>Sao chép ID</strong> để dán vào IDE/SDK.`;
   }
 
   if (dom.landingModelsTbody) {
     dom.landingModelsTbody.innerHTML = models
       .map(
-        (model) => `
+        (model) => {
+          const cachedRate = model.cachedInputMicrosPerMillion ?? Math.round((model.inputMicrosPerMillion ?? 0) * 0.25);
+          return `
         <tr>
           <td>
             <div class="mono"><strong>${escapeHtml(model.id)}</strong></div>
             <span class="sub-line"><span class="badge badge-success">Sẵn sàng</span></span>
           </td>
           <td class="num">${escapeHtml(formatMicrosToUsd(model.inputMicrosPerMillion))}</td>
+          <td class="num"><strong style="color: #059669">${escapeHtml(formatMicrosToUsd(cachedRate))}</strong></td>
           <td class="num">${escapeHtml(formatMicrosToUsd(model.outputMicrosPerMillion))}</td>
           <td class="num">${escapeHtml(formatInteger(model.maxInputTokens))} / ${escapeHtml(formatInteger(model.maxOutputTokens))} tok</td>
           <td>
             <button type="button" class="btn btn-outline btn-sm" data-copy-model="${escapeHtml(model.id)}">Sao chép ID</button>
           </td>
         </tr>
-      `,
+      `;
+        },
       )
       .join('');
   }
 
-  dom.linesModalSub.textContent = `LIVE ROUTING TABLE · ${models.length} MODEL`;
+  dom.linesModalSub.textContent = `LIVE ROUTING TABLE · ${models.length} MODEL · CACHE 25%`;
   dom.linesModalBody.innerHTML = models
     .map(
-      (model) => `
+      (model) => {
+        const cachedRate = model.cachedInputMicrosPerMillion ?? Math.round((model.inputMicrosPerMillion ?? 0) * 0.25);
+        return `
       <div class="line-row">
         <div>
           <div class="mono"><strong>${escapeHtml(model.id)}</strong></div>
@@ -206,11 +213,12 @@ function renderLiveBarAndModal() {
         <div style="text-align: right" class="num">
           <button type="button" class="btn btn-outline btn-sm" data-copy-model="${escapeHtml(model.id)}">Sao chép ID</button>
           <span class="sub-line mono">
-            In ${escapeHtml(formatMicrosToUsd(model.inputMicrosPerMillion))} · Out ${escapeHtml(formatMicrosToUsd(model.outputMicrosPerMillion))}
+            In ${escapeHtml(formatMicrosToUsd(model.inputMicrosPerMillion))} · <span style="color: #059669; font-weight: 700">Cache ${escapeHtml(formatMicrosToUsd(cachedRate))}</span> · Out ${escapeHtml(formatMicrosToUsd(model.outputMicrosPerMillion))}
           </span>
         </div>
       </div>
-    `,
+    `;
+      },
     )
     .join('');
 }

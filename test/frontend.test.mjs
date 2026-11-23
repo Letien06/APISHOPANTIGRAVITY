@@ -3,11 +3,14 @@ import test from 'node:test';
 import { createGateway } from '../src/server.mjs';
 import { createStore } from '../src/store.mjs';
 import {
+  appendRequestPage,
+  formatLoadedCount,
   formatMicrosInputValue,
   formatMicrosToUsd,
   formatVnDateTime,
   isChargeCappedByReservation,
   isoUtcToVnInput,
+  mergeRequestPages,
   parseUsdToMicros,
   translateApiError,
   vnInputToIsoUtc,
@@ -69,6 +72,55 @@ test('Vietnam timezone (UTC+7) conversion and reservation cap detection work det
   assert.equal(translateApiError({ error: { code: 'quota_below_usage' } }, 409).code, 'quota_below_usage');
 });
 
+test('Live pagination merge preserves cursors without duplicates, resets gaps, and formats loaded totals', () => {
+  const mk = (id, status = 'success') => ({ id, status, chargedMicros: id * 10 });
+  const rangeDesc = (hi, lo) => Array.from({ length: hi - lo + 1 }, (_, i) => mk(hi - i));
+
+  // Case 1: 25 existing items (85..109, cursor 85) + 1 new item arrives (incoming 86..110, incomingCursor 86)
+  // Merged has 26 items (85..110); cursor MUST stay 85 (lowest loaded), NOT jump to 86!
+  const c1 = mergeRequestPages(rangeDesc(109, 85), rangeDesc(110, 86), {
+    pageLimit: 25,
+    incomingCursor: 86,
+    currentCursor: 85,
+  });
+  assert.equal(c1.merged.length, 26);
+  assert.equal(c1.merged[0].id, 110);
+  assert.equal(c1.merged.at(-1).id, 85);
+  assert.equal(c1.nextCursor, 85);
+  assert.deepEqual([...c1.changed], [110]);
+
+  // Case 2: All 25 items in DB already loaded (1..25, currentCursor null) + 1 new item (26) arrives
+  // Merged has all 26 items (1..26); nextCursor MUST stay null (no bogus Load More button)!
+  const c2 = mergeRequestPages(rangeDesc(25, 1), rangeDesc(26, 2), {
+    pageLimit: 25,
+    incomingCursor: 2,
+    currentCursor: null,
+  });
+  assert.equal(c2.merged.length, 26);
+  assert.equal(c2.nextCursor, null);
+
+  // Case 3: Burst >= pageLimit new items arrive with zero overlap -> reset cleanly to avoid middle gap
+  const c3 = mergeRequestPages(rangeDesc(84, 60), rangeDesc(114, 90), {
+    pageLimit: 25,
+    incomingCursor: 90,
+    currentCursor: 60,
+  });
+  assert.equal(c3.merged.length, 25);
+  assert.equal(c3.merged[0].id, 114);
+  assert.equal(c3.merged.at(-1).id, 90);
+  assert.equal(c3.nextCursor, 90);
+
+  // Case 4: appendRequestPage deduplicates overlapping IDs and keeps DESC order
+  const appended = appendRequestPage(rangeDesc(110, 85), rangeDesc(86, 80));
+  assert.equal(appended.length, 31);
+  assert.equal(appended[0].id, 110);
+  assert.equal(appended.at(-1).id, 80);
+
+  // Case 5: formatLoadedCount shows loaded / total when paginated, and plain total when all loaded
+  assert.match(formatLoadedCount(26, 110), /26 \/ 110 mục/);
+  assert.equal(formatLoadedCount(110, 110), '110 mục');
+});
+
 test('Admin server enforces loopback-only binding', () => {
   assert.doesNotThrow(() => assertLoopbackHost('127.0.0.1'));
   assert.doesNotThrow(() => assertLoopbackHost('::1'));
@@ -116,6 +168,7 @@ test('Public origin strictly isolates /usage and blocks all admin UI, assets, an
       '/admin/v1/keys',
       '/admin/v1/models',
       '/admin/v1/users',
+      '/admin/v1/requests',
       '/healthz',
       '/dashboard',
     ];
@@ -162,7 +215,7 @@ test('Public origin strictly isolates /usage and blocks all admin UI, assets, an
       headers: { Authorization: `Bearer ${MOCK_CREDENTIALS.emptyKey}` },
     });
     assert.equal(emptyHistRes.status, 200);
-    assert.deepEqual(await emptyHistRes.json(), { items: [], nextCursor: null });
+    assert.deepEqual(await emptyHistRes.json(), { items: [], nextCursor: null, total: 0 });
 
     // Multi-page pagination & edge-case requests on active key
     const page1Res = await fetch(`${publicOrigin}/api/usage/requests?limit=25`, {
@@ -467,6 +520,39 @@ test('Full user registration, login, shared-wallet multi-key console, key copy s
     const usersList = await (await fetch(`${adminOrigin}/admin/v1/users`, { headers: adminHeaders })).json();
     assert.equal(usersList.items.length, 1);
     assert.equal(usersList.items[0].remainingMicros, 300_000);
+
+    // Admin can reveal/copy key secret and inspect global live server requests feed
+    const adminSecretRes = await fetch(`${adminOrigin}/admin/v1/keys/${key1.id}/secret`, { headers: adminHeaders });
+    assert.equal(adminSecretRes.status, 200);
+    assert.equal((await adminSecretRes.json()).key, key1.key);
+
+    const adminLiveReqsRes = await fetch(`${adminOrigin}/admin/v1/requests?limit=25`, { headers: adminHeaders });
+    assert.equal(adminLiveReqsRes.status, 200);
+    const adminLiveReqs = await adminLiveReqsRes.json();
+    assert.equal(adminLiveReqs.items.length, 1);
+    assert.equal(adminLiveReqs.total, 1);
+    assert.equal(adminLiveReqs.items[0].keyId, key1.id);
+    assert.equal(adminLiveReqs.items[0].keyName, 'Cursor Work');
+    assert.equal(adminLiveReqs.items[0].username, 'minh_dev');
+
+    // Malformed percent-encoded cookie returns 401 cleanly instead of 500
+    const badCookieRes = await fetch(`${publicOrigin}/api/auth/me`, {
+      headers: { Cookie: 'tc_session=%E0%A4%A' },
+    });
+    assert.equal(badCookieRes.status, 401);
+
+    // Admin patching a shared-wallet key does not override account wallet quota
+    const patchUserKeyRes = await fetch(`${adminOrigin}/admin/v1/keys/${key1.id}`, {
+      method: 'PATCH',
+      headers: adminHeaders,
+      body: JSON.stringify({ name: 'Cursor Work Renamed', quotaMicros: 99_000_000 }),
+    });
+    assert.equal(patchUserKeyRes.status, 200);
+    const patchedUserKey = await patchUserKeyRes.json();
+    assert.equal(patchedUserKey.name, 'Cursor Work Renamed');
+    assert.equal(patchedUserKey.quotaMicros, 1_000_000);
+    assert.equal(patchedUserKey.keyEnabled, true);
+    assert.equal(patchedUserKey.accountEnabled, true);
 
     const badLowerRes = await fetch(`${adminOrigin}/admin/v1/users/${regData.user.id}`, {
       method: 'PATCH',

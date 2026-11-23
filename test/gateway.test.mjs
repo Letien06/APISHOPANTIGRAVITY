@@ -205,6 +205,38 @@ test('streaming SSE succeeds when upstream omits trailing blank line or [DONE] a
   );
 });
 
+test('prompt caching bills cached input tokens at 25% Gemini rate for both Chat and Responses APIs', async (t) => {
+  const { call, makeKey, use } = await fixture(t, (res, request) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    if (request.path === '/v1/responses') {
+      return res.end(JSON.stringify({
+        id: 'resp_cached',
+        status: 'completed',
+        usage: { input_tokens: 10, output_tokens: 2, input_tokens_details: { cached_tokens: 4 } },
+      }));
+    }
+    return res.end(JSON.stringify({
+      choices: [{ message: { content: 'cached' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 8 } },
+    }));
+  });
+  const { key } = await makeKey({ quotaMicros: 500 });
+
+  assert.equal((await use(key, {})).status, 200);
+  assert.equal((await call('/v1/responses', { token: key, body: { model, input: 'hi' } })).status, 200);
+
+  const history = await (await call('/api/usage/requests?limit=2', { token: key })).json();
+  assert.deepEqual(
+    history.items.map((i) => [i.inputTokens, i.cachedTokens, i.inputCostMicros, i.outputCostMicros, i.chargedMicros]),
+    [
+      [10, 4, 14, 6, 20],
+      [10, 8, 8, 6, 14],
+    ],
+  );
+  const summary = await (await call('/api/usage', { token: key })).json();
+  assert.equal(summary.usedMicros, 34);
+});
+
 test('a restarted process recovers a stale reservation once', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gateway-test-'));
   const database = join(dir, 'test.sqlite');

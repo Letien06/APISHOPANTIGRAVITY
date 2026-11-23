@@ -9,7 +9,7 @@ import { proxyInference } from './upstream.mjs';
 
 const CHAT = '/v1/chat/completions';
 const RESPONSES = '/v1/responses';
-const KEY_ROUTE = /^\/admin\/v1\/keys\/([\da-f-]{36})(\/requests)?$/;
+const KEY_ROUTE = /^\/admin\/v1\/keys\/([\da-f-]{36})(\/requests|\/secret)?$/;
 const ADMIN_USER_ROUTE = /^\/admin\/v1\/users\/([\da-f-]{36})$/;
 const CONSOLE_KEY_ROUTE = /^\/api\/console\/keys\/([\da-f-]{36})(\/requests|\/secret)?$/;
 const KEY_FIELDS = new Set(['name', 'quotaMicros', 'expiresAt', 'models', 'enabled']);
@@ -52,7 +52,12 @@ function readCookie(req, name) {
     const eq = part.indexOf('=');
     if (eq < 0) continue;
     if (part.slice(0, eq).trim() === name) {
-      return decodeURIComponent(part.slice(eq + 1).trim());
+      const raw = part.slice(eq + 1).trim();
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return '';
+      }
     }
   }
   return '';
@@ -246,6 +251,14 @@ function costMicros(tokens, rate) {
   return cost <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(cost) : null;
 }
 
+function inputCostWithCacheMicros(inputTokens, cachedTokens, inputRate, cachedRate) {
+  const safeCached = Math.min(Math.max(0, cachedTokens ?? 0), inputTokens);
+  const uncached = inputTokens - safeCached;
+  const weighted = BigInt(uncached) * BigInt(inputRate) + BigInt(safeCached) * BigInt(cachedRate);
+  const cost = (weighted + 999_999n) / 1_000_000n;
+  return cost <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(cost) : null;
+}
+
 function inferenceBudget(body, endpoint, model) {
   if (Object.hasOwn(body, 'stream') && typeof body.stream !== 'boolean') {
     throw badInput('stream must be a boolean.');
@@ -273,10 +286,14 @@ function inferenceBudget(body, endpoint, model) {
 function accounting(observation, model, budget) {
   const { inputTokens, outputTokens } = observation;
   if (inputTokens !== null && outputTokens !== null) {
-    const inputCostMicros = costMicros(inputTokens, model.inputMicrosPerMillion);
+    const cachedTokens = Number.isSafeInteger(observation.cachedTokens) && observation.cachedTokens > 0
+      ? Math.min(observation.cachedTokens, inputTokens)
+      : 0;
+    const cachedRate = model.cachedInputMicrosPerMillion ?? Math.round(model.inputMicrosPerMillion * 0.25);
+    const inputCostMicros = inputCostWithCacheMicros(inputTokens, cachedTokens, model.inputMicrosPerMillion, cachedRate);
     const outputCostMicros = costMicros(outputTokens, model.outputMicrosPerMillion);
     if (inputCostMicros !== null && outputCostMicros !== null && Number.isSafeInteger(inputCostMicros + outputCostMicros)) {
-      return { ...observation, inputCostMicros, outputCostMicros, estimated: false };
+      return { ...observation, cachedTokens, inputCostMicros, outputCostMicros, estimated: false };
     }
   }
   const estimated = observation.status !== 'upstream_error';
@@ -285,6 +302,7 @@ function accounting(observation, model, budget) {
     status: observation.status === 'success' ? 'usage_missing' : observation.status,
     inputTokens: null,
     outputTokens: null,
+    cachedTokens: null,
     inputCostMicros: estimated ? budget.inputReservedMicros : 0,
     outputCostMicros: estimated ? budget.outputReservedMicros : 0,
     estimated,
@@ -307,6 +325,11 @@ function createAuthRateLimiter({ windowMs = 5 * 60_000, maxAttempts = 25 } = {})
     const forwarded = String(req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
     const key = forwarded || req.socket.remoteAddress || 'local';
     const now = Date.now();
+    if (buckets.size > 500) {
+      for (const [k, item] of buckets) {
+        if (item.resetAt <= now) buckets.delete(k);
+      }
+    }
     const entry = buckets.get(key);
     if (!entry || entry.resetAt <= now) {
       buckets.set(key, { count: 1, resetAt: now + windowMs });
@@ -545,6 +568,9 @@ export function createGateway({ config, store }) {
       }
       throw notFound();
     }
+    if (url.pathname === '/admin/v1/requests' && req.method === 'GET') {
+      return json(res, 200, store.listAllRequests(page(url.searchParams)));
+    }
     if (url.pathname === '/admin/v1/keys') {
       if (req.method === 'GET') return json(res, 200, { items: store.listKeys().map(withStatus) });
       if (req.method === 'POST') {
@@ -552,14 +578,20 @@ export function createGateway({ config, store }) {
         return json(res, 201, withStatus(store.createKey(keyInput(body, config.models, true))));
       }
     }
-    const [, id, requests] = KEY_ROUTE.exec(url.pathname) ?? [];
+    const [, id, sub] = KEY_ROUTE.exec(url.pathname) ?? [];
     if (!id) throw notFound();
     if (req.method === 'GET') {
       const key = store.getKey(id);
       if (!key) throw notFound();
-      return json(res, 200, requests ? store.listRequests(id, page(url.searchParams)) : withStatus(key));
+      if (sub === '/requests') return json(res, 200, store.listRequests(id, page(url.searchParams)));
+      if (sub === '/secret') {
+        const secret = store.revealKeySecret(id);
+        if (!secret) throw new HttpError(404, 'secret_unavailable', 'Khóa cũ không lưu bản mã hóa để sao chép lại.');
+        return json(res, 200, { key: secret });
+      }
+      return json(res, 200, withStatus(key));
     }
-    if (requests) throw notFound();
+    if (sub) throw notFound();
     if (req.method === 'PATCH') {
       const body = await readObject(req, config.maxBodyBytes);
       const updated = store.updateKey(id, keyInput(body, config.models, false));

@@ -427,7 +427,7 @@ function paginateRequests(all, { limit, before }) {
   const filtered = before === null ? all : all.filter((item) => item.id < before);
   const items = filtered.slice(0, limit);
   const nextCursor = filtered.length > limit ? items.at(-1).id : null;
-  return { items, nextCursor };
+  return { items, nextCursor, total: all.length };
 }
 
 function validateExpiry(value) {

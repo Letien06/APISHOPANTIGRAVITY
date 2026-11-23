@@ -68,7 +68,11 @@ function readModels(filename) {
     if (!['max_tokens', 'max_completion_tokens'].includes(chatOutputLimitField)) {
       throw new Error(`Invalid chatOutputLimitField in MODELS_FILE for ${model.id}`);
     }
-    models.set(model.id, { id: model.id, ...limits, chatOutputLimitField });
+    const cachedInputMicrosPerMillion = model.cachedInputMicrosPerMillion ?? Math.round(limits.inputMicrosPerMillion * 0.25);
+    if (!Number.isSafeInteger(cachedInputMicrosPerMillion) || cachedInputMicrosPerMillion < 0 || cachedInputMicrosPerMillion > 1_000_000_000_000) {
+      throw new Error(`Invalid cachedInputMicrosPerMillion in MODELS_FILE for ${model.id}`);
+    }
+    models.set(model.id, { id: model.id, ...limits, cachedInputMicrosPerMillion, chatOutputLimitField });
   }
   return models;
 }
@@ -98,8 +102,8 @@ export function loadConfig(env = process.env) {
     routerOrigin: upstreamOrigin(env.ROUTER_BASE_URL ?? 'http://127.0.0.1:20128'),
     databasePath: env.DB_PATH ?? './data/gateway.sqlite',
     models: readModels(env.MODELS_FILE ?? './models.json'),
-    upstreamTimeoutMs: integer(env.UPSTREAM_TIMEOUT_MS ?? '120000', 'UPSTREAM_TIMEOUT_MS', 1000, 600_000),
-    maxBodyBytes: integer(env.MAX_BODY_BYTES ?? '1048576', 'MAX_BODY_BYTES', 1024, 16_777_216),
+    upstreamTimeoutMs: integer(env.UPSTREAM_TIMEOUT_MS ?? '600000', 'UPSTREAM_TIMEOUT_MS', 1000, 600_000),
+    maxBodyBytes: integer(env.MAX_BODY_BYTES ?? '16777216', 'MAX_BODY_BYTES', 1024, 52_428_800),
     defaultUserQuotaMicros: integer(
       env.DEFAULT_USER_QUOTA_MICROS ?? '1000000',
       'DEFAULT_USER_QUOTA_MICROS',

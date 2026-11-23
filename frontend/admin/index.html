@@ -111,20 +111,80 @@
       <div id="workspace" class="hidden">
         <div id="global-feedback" class="alert hidden" role="status" aria-live="polite"></div>
 
+        <!-- Compact Global Overview KPIs -->
+        <div class="admin-overview-kpi" aria-label="Tổng quan hệ thống">
+          <div class="kpi-card">
+            <div class="kpi-label">Khóa đang hoạt động</div>
+            <div class="kpi-value" id="ov-active-keys">0 / 0</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Tài khoản người dùng</div>
+            <div class="kpi-value" id="ov-users">0</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Tổng request toàn hệ thống</div>
+            <div class="kpi-value" id="ov-requests">0</div>
+          </div>
+          <div class="kpi-card kpi-highlight">
+            <div class="kpi-label">Tổng đã sử dụng (USD)</div>
+            <div class="kpi-value" id="ov-spent">$0.00</div>
+          </div>
+        </div>
+
+        <!-- Multi-Page Navigation Bar -->
+        <nav class="admin-top-bar" aria-label="Phân trang quản trị">
+          <div class="admin-nav-tabs" role="tablist">
+            <button type="button" class="admin-nav-tab active" data-page="keys" role="tab" aria-selected="true">
+              <span>Khóa API</span>
+              <span class="tab-count" id="nav-count-keys">0</span>
+            </button>
+            <button type="button" class="admin-nav-tab" data-page="live" role="tab" aria-selected="false">
+              <span class="live-dot-pulse" aria-hidden="true"></span>
+              <span>Request trực tiếp</span>
+              <span class="tab-count" id="nav-count-live">0</span>
+            </button>
+            <button type="button" class="admin-nav-tab" data-page="users" role="tab" aria-selected="false">
+              <span>Tài khoản</span>
+              <span class="tab-count" id="nav-count-users">0</span>
+            </button>
+            <button type="button" class="admin-nav-tab" data-page="models" role="tab" aria-selected="false">
+              <span>Models</span>
+              <span class="tab-count" id="nav-count-models">0</span>
+            </button>
+          </div>
+          <div class="toolbar-actions">
+            <button id="admin-live-toggle" type="button" class="btn btn-secondary btn-sm live-toggle-btn" aria-pressed="true" title="Tự động cập nhật toàn bộ dữ liệu mỗi 3 giây">
+              <span class="live-dot-pulse" aria-hidden="true"></span>
+              <span>Trực tiếp (3s)</span>
+            </button>
+            <button id="refresh-all-btn" type="button" class="btn btn-secondary btn-sm">Làm mới</button>
+            <button id="open-create-key-btn" type="button" class="btn btn-primary btn-sm">+ Tạo khóa mới</button>
+          </div>
+        </nav>
+
+        <!-- PAGE 1: API KEYS + DETAIL -->
+        <div class="admin-page" data-page-view="keys">
         <section class="card section" aria-labelledby="keys-heading">
           <div class="toolbar">
             <div>
               <h2 id="keys-heading">Danh sách khóa API</h2>
-              <span class="sub-line" id="keys-subtitle">Quản lý hạn mức USD (1 USD = 1.000.000 micros), hạn dùng và trạng thái từng khóa</span>
-            </div>
-            <div class="toolbar-actions">
-              <button id="refresh-all-btn" type="button" class="btn btn-secondary">Làm mới</button>
-              <button id="open-create-key-btn" type="button" class="btn btn-primary">+ Tạo khóa mới</button>
+              <span class="sub-line" id="keys-subtitle">Quản lý hạn mức USD, sao chép khóa, xem số request và trạng thái từng khóa</span>
             </div>
           </div>
 
+          <div class="filter-bar">
+            <input id="keys-search" class="text-input" type="search" placeholder="Tìm theo tên khóa, tiền tố gw_..., hoặc @username..." autocomplete="off" />
+            <select id="keys-status-filter" class="select-input" aria-label="Lọc theo trạng thái khóa">
+              <option value="all">Tất cả trạng thái</option>
+              <option value="active">Đang hoạt động</option>
+              <option value="disabled">Đã vô hiệu hóa</option>
+              <option value="exhausted">Hết hạn mức</option>
+              <option value="expired">Hết hạn dùng</option>
+            </select>
+          </div>
+
           <div id="keys-empty" class="empty-state hidden">
-            <p>Chưa có khóa nào được tạo. Bấm <strong>+ Tạo khóa mới</strong> để cấp khóa đầu tiên.</p>
+            <p>Không tìm thấy khóa nào phù hợp.</p>
           </div>
 
           <div id="keys-table-wrap" class="table-scroll hidden">
@@ -153,6 +213,7 @@
             </div>
             <div class="toolbar-actions">
               <span id="detail-status-badge" class="badge badge-neutral"></span>
+              <button id="detail-copy-key-btn" type="button" class="btn btn-secondary btn-sm hidden">Sao chép khóa</button>
               <button id="detail-edit-btn" type="button" class="btn btn-secondary btn-sm">Chỉnh sửa</button>
               <button id="detail-toggle-enabled-btn" type="button" class="btn btn-danger-outline btn-sm">Vô hiệu hóa khóa</button>
               <button id="detail-close-btn" type="button" class="btn btn-secondary btn-sm">Đóng chi tiết</button>
@@ -230,18 +291,70 @@
             <button id="detail-load-more-btn" type="button" class="btn btn-secondary">Tải thêm</button>
           </div>
         </section>
+        </div>
 
+        <!-- PAGE 2: LIVE SERVER REQUESTS -->
+        <div class="admin-page hidden" data-page-view="live">
+        <section id="live-requests-section" class="card section" aria-labelledby="live-requests-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="live-requests-heading">Lịch sử yêu cầu trực tiếp toàn server</h2>
+              <span class="sub-line">Quan sát mọi request từ tất cả khóa &amp; tài khoản theo thời gian thực · Giờ Việt Nam (UTC+7)</span>
+            </div>
+            <div class="toolbar-actions">
+              <span id="live-requests-count" class="badge badge-neutral">0 mục</span>
+            </div>
+          </div>
+
+          <div class="filter-bar">
+            <input id="live-search" class="text-input" type="search" placeholder="Lọc theo tên khóa, @username, model hoặc endpoint..." autocomplete="off" />
+          </div>
+
+          <div id="live-requests-error" class="alert alert-danger hidden" role="alert"></div>
+          <div id="live-requests-empty" class="empty-state hidden">
+            <p>Chưa có request nào phù hợp.</p>
+          </div>
+
+          <div id="live-requests-table-wrap" class="table-scroll hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Thời điểm (UTC+7)</th>
+                  <th scope="col">Khóa &amp; Tài khoản</th>
+                  <th scope="col">Model &amp; Endpoint</th>
+                  <th scope="col">Trạng thái</th>
+                  <th scope="col">Đầu vào</th>
+                  <th scope="col">Đầu ra</th>
+                  <th scope="col">Tổng trừ</th>
+                </tr>
+              </thead>
+              <tbody id="live-requests-tbody"></tbody>
+            </table>
+          </div>
+
+          <div id="live-load-more-wrap" class="load-more-wrap hidden">
+            <button id="live-load-more-btn" type="button" class="btn btn-secondary">Tải thêm</button>
+          </div>
+        </section>
+        </div>
+
+        <!-- PAGE 3: USERS -->
+        <div class="admin-page hidden" data-page-view="users">
         <section class="card section" aria-labelledby="users-heading">
           <div class="toolbar">
             <div>
               <h2 id="users-heading">Tài khoản người dùng đã đăng ký</h2>
-              <span class="sub-line">Quản lý hạn mức tài khoản (USD) và trạng thái đăng nhập của bạn bè</span>
+              <span class="sub-line">Quản lý hạn mức ví tài khoản (USD) và trạng thái đăng nhập của bạn bè</span>
             </div>
             <span id="users-count" class="badge badge-neutral">0 tài khoản</span>
           </div>
 
+          <div class="filter-bar">
+            <input id="users-search" class="text-input" type="search" placeholder="Tìm theo tên tài khoản @username hoặc email..." autocomplete="off" />
+          </div>
+
           <div id="users-empty" class="empty-state hidden">
-            <p>Chưa có người dùng nào đăng ký tài khoản.</p>
+            <p>Không tìm thấy tài khoản nào.</p>
           </div>
 
           <div id="users-table-wrap" class="table-scroll hidden">
@@ -260,7 +373,10 @@
             </table>
           </div>
         </section>
+        </div>
 
+        <!-- PAGE 4: MODELS -->
+        <div class="admin-page hidden" data-page-view="models">
         <section class="card section" aria-labelledby="models-heading">
           <div class="toolbar">
             <div>
@@ -270,12 +386,17 @@
             <span id="models-count" class="badge badge-neutral">0 model</span>
           </div>
 
+          <div class="filter-bar">
+            <input id="models-search" class="text-input" type="search" placeholder="Tìm nhanh theo ID model (ví dụ: gemini-4, flash, claude)..." autocomplete="off" />
+          </div>
+
           <div class="table-scroll">
             <table class="data-table">
               <thead>
                 <tr>
                   <th scope="col">ID Model</th>
                   <th scope="col">Giá đầu vào / 1M token</th>
+                  <th scope="col">Giá bộ đệm (25%) / 1M token</th>
                   <th scope="col">Giá đầu ra / 1M token</th>
                   <th scope="col">Giới hạn token vào</th>
                   <th scope="col">Giới hạn token ra</th>
@@ -286,6 +407,7 @@
             </table>
           </div>
         </section>
+        </div>
       </div>
     </main>
 

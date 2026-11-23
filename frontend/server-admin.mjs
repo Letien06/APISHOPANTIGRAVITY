@@ -8,7 +8,7 @@ const ADMIN_DIR = join(__dirname, 'admin');
 const SHARED_DIR = join(__dirname, 'shared');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
-const KEY_ID_ROUTE = /^\/admin\/v1\/keys\/([\da-f-]{36})(\/requests)?$/;
+const KEY_ID_ROUTE = /^\/admin\/v1\/keys\/([\da-f-]{36})(\/requests|\/secret)?$/;
 const USER_ID_ROUTE = /^\/admin\/v1\/users\/([\da-f-]{36})$/;
 
 const STATIC_ROUTES = new Map([
@@ -26,13 +26,14 @@ const STATIC_ROUTES = new Map([
 function isAllowedAdminApi(method, pathname) {
   if (pathname === '/admin/v1/login' || pathname === '/admin/v1/logout') return method === 'POST';
   if (pathname === '/admin/v1/models') return method === 'GET';
+  if (pathname === '/admin/v1/requests') return method === 'GET';
   if (pathname === '/admin/v1/users') return method === 'GET';
   if (USER_ID_ROUTE.test(pathname)) return method === 'GET' || method === 'PATCH';
   if (pathname === '/admin/v1/keys') return method === 'GET' || method === 'POST';
   const match = KEY_ID_ROUTE.exec(pathname);
   if (!match) return false;
-  const isRequests = Boolean(match[2]);
-  if (isRequests) return method === 'GET';
+  const hasSub = Boolean(match[2]);
+  if (hasSub) return method === 'GET';
   return method === 'GET' || method === 'PATCH' || method === 'DELETE';
 }
 

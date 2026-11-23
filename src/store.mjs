@@ -61,6 +61,7 @@ function describeRequest(row) {
     status: row.status,
     inputTokens: row.input_tokens,
     outputTokens: row.output_tokens,
+    cachedTokens: row.cached_tokens ?? null,
     inputCostMicros: row.input_cost_micros,
     outputCostMicros: row.output_cost_micros,
     chargedMicros: row.charged_micros,
@@ -137,6 +138,7 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
         http_status INTEGER,
         input_tokens INTEGER,
         output_tokens INTEGER,
+        cached_tokens INTEGER,
         input_cost_micros INTEGER,
         output_cost_micros INTEGER,
         charged_micros INTEGER,
@@ -159,6 +161,10 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
     }
     if (!keyColumns.some((col) => col.name === 'encrypted_secret')) {
       db.exec('ALTER TABLE gateway_keys ADD COLUMN encrypted_secret TEXT')
+    }
+    const reqColumns = db.prepare('PRAGMA table_info(gateway_requests)').all()
+    if (!reqColumns.some((col) => col.name === 'cached_tokens')) {
+      db.exec('ALTER TABLE gateway_requests ADD COLUMN cached_tokens INTEGER')
     }
     db.exec('CREATE INDEX IF NOT EXISTS gateway_keys_user ON gateway_keys(user_id)')
 
@@ -188,7 +194,7 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
       WHERE id = ?
     `)
     const completeRequest = db.prepare(`
-      UPDATE gateway_requests SET http_status = ?, status = ?, input_tokens = ?, output_tokens = ?,
+      UPDATE gateway_requests SET http_status = ?, status = ?, input_tokens = ?, output_tokens = ?, cached_tokens = ?,
         input_cost_micros = ?, output_cost_micros = ?,
         charged_micros = MIN(? + ?, input_reserved_micros + output_reserved_micros),
         estimated = ?, finished_at = ?
@@ -210,6 +216,27 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
     `)
     const earlierRequests = db.prepare(`
       SELECT * FROM gateway_requests WHERE key_id = ? AND id < ? ORDER BY id DESC LIMIT ?
+    `)
+    const countKeyRequests = db.prepare(`
+      SELECT COUNT(*) AS total FROM gateway_requests WHERE key_id = ?
+    `)
+    const latestAllRequests = db.prepare(`
+      SELECT r.*, k.name AS key_name, k.key_prefix AS key_prefix, u.username AS username
+      FROM gateway_requests r
+      LEFT JOIN gateway_keys k ON k.id = r.key_id
+      LEFT JOIN gateway_users u ON u.id = k.user_id
+      ORDER BY r.id DESC LIMIT ?
+    `)
+    const earlierAllRequests = db.prepare(`
+      SELECT r.*, k.name AS key_name, k.key_prefix AS key_prefix, u.username AS username
+      FROM gateway_requests r
+      LEFT JOIN gateway_keys k ON k.id = r.key_id
+      LEFT JOIN gateway_users u ON u.id = k.user_id
+      WHERE r.id < ?
+      ORDER BY r.id DESC LIMIT ?
+    `)
+    const countAllRequests = db.prepare(`
+      SELECT COUNT(*) AS total FROM gateway_requests
     `)
 
     // User & session prepared statements
@@ -286,11 +313,14 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           return {
             ...base,
             userId: row.user_id,
+            username: wallet.owner.username,
             sharedWallet: true,
             quotaMicros: wallet.quotaMicros,
             remainingMicros: wallet.remainingMicros,
             accountUsedMicros: wallet.usedMicros,
             accountReservedMicros: wallet.reservedMicros,
+            keyEnabled: Boolean(row.enabled),
+            accountEnabled: Boolean(wallet.owner.enabled),
             enabled: Boolean(row.enabled) && Boolean(wallet.owner.enabled),
           }
         }
@@ -366,9 +396,10 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           if (!row.user_id && patch.quotaMicros !== undefined && patch.quotaMicros < row.used_micros + row.reserved_micros) {
             throw storeError('quota_below_usage', 'Quota cannot be lower than settled and reserved usage.')
           }
+          const nextQuota = row.user_id ? row.quota_micros : (patch.quotaMicros ?? row.quota_micros)
           return summarize(writeKey.get(
             patch.name ?? row.name,
-            patch.quotaMicros ?? row.quota_micros,
+            nextQuota,
             patch.expiresAt === undefined ? row.expires_at : patch.expiresAt,
             patch.models === undefined ? row.models : JSON.stringify(patch.models),
             patch.enabled === undefined ? row.enabled : Number(patch.enabled),
@@ -397,10 +428,10 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           return { id: row.id }
         })
       },
-      settle(id, { httpStatus, status, inputTokens, outputTokens, inputCostMicros, outputCostMicros, estimated }) {
+      settle(id, { httpStatus, status, inputTokens, outputTokens, cachedTokens = null, inputCostMicros, outputCostMicros, estimated }) {
         return transaction(() => {
           const row = completeRequest.get(
-            httpStatus ?? null, status, inputTokens ?? null, outputTokens ?? null,
+            httpStatus ?? null, status, inputTokens ?? null, outputTokens ?? null, cachedTokens ?? null,
             inputCostMicros, outputCostMicros, inputCostMicros, outputCostMicros,
             Number(Boolean(estimated)), nowIso(), id,
           )
@@ -419,7 +450,28 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           ? latestRequests.all(keyId, limit + 1)
           : earlierRequests.all(keyId, before, limit + 1)
         const items = rows.slice(0, limit).map(describeRequest)
-        return { items, nextCursor: rows.length > limit ? items.at(-1).id : null }
+        const total = Number(countKeyRequests.get(keyId)?.total ?? items.length)
+        return { items, nextCursor: rows.length > limit ? items.at(-1).id : null, total }
+      },
+      listAllRequests({ limit = 50, before = null } = {}) {
+        recoverBeforeRead()
+        const rows = before === null
+          ? latestAllRequests.all(limit + 1)
+          : earlierAllRequests.all(before, limit + 1)
+        const items = rows.slice(0, limit).map((row) => ({
+          ...describeRequest(row),
+          keyId: row.key_id,
+          keyName: row.key_name ?? 'Không rõ',
+          keyPrefix: row.key_prefix ?? '',
+          username: row.username ?? null,
+        }))
+        const total = Number(countAllRequests.get()?.total ?? items.length)
+        return { items, nextCursor: rows.length > limit ? items.at(-1).id : null, total }
+      },
+      revealKeySecret(keyId) {
+        const row = getKeyRow.get(keyId)
+        if (!row) return null
+        return decryptSecret(row.encrypted_secret, vaultKey)
       },
 
       // --- User account & shared-wallet self-service console methods ---

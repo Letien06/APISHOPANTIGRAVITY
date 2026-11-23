@@ -1,6 +1,8 @@
 import {
+  appendRequestPage,
   escapeHtml,
   formatInteger,
+  formatLoadedCount,
   formatMicrosInputValue,
   formatMicrosToUsd,
   formatModelsSummary,
@@ -9,13 +11,14 @@ import {
   getRequestStatusMeta,
   isChargeCappedByReservation,
   isoUtcToVnInput,
+  mergeRequestPages,
   parseUsdToMicros,
   renderNullableValue,
   translateApiError,
   vnInputToIsoUtc,
 } from '/assets/format.js';
 
-const PAGE_LIMIT = 25;
+const PAGE_LIMIT = 50;
 const BASE_URL = 'https://api.tiencoder.tech/v1';
 
 const dom = {
@@ -81,6 +84,7 @@ const state = {
   models: [],
   selectedKey: null,
   history: [],
+  historyTotal: 0,
   nextCursor: null,
   loadingMore: false,
   modalMode: 'create',
@@ -91,6 +95,7 @@ const state = {
   pollTimer: null,
   pollInFlight: false,
   flashIds: new Set(),
+  flashTimer: null,
 };
 
 const LIVE_INTERVAL_MS = 3000;
@@ -250,7 +255,8 @@ function renderHistory() {
   dom.detailSection.classList.remove('hidden');
   dom.detailHeading.textContent = `Lịch sử khóa: ${state.selectedKey.name}`;
   dom.detailPrefix.textContent = `${state.selectedKey.keyPrefix}•••`;
-  dom.detailHistoryCount.textContent = `${state.history.length} mục`;
+  const total = Math.max(state.history.length, state.historyTotal, Number(state.selectedKey.requestCount ?? 0));
+  dom.detailHistoryCount.textContent = formatLoadedCount(state.history.length, total);
 
   if (state.history.length === 0) {
     dom.detailEmpty.classList.remove('hidden');
@@ -267,6 +273,7 @@ function renderHistory() {
       const capped = isChargeCappedByReservation(item);
       const inTok = formatInteger(item.inputTokens);
       const outTok = formatInteger(item.outputTokens);
+      const cachedTok = item.cachedTokens > 0 ? formatInteger(item.cachedTokens) : null;
       return `
         <tr class="${state.flashIds.has(item.id) ? 'row-new' : ''}">
           <td class="num">
@@ -287,6 +294,7 @@ function renderHistory() {
           <td class="num">
             <div>${renderNullableValue(formatMicrosToUsd(item.inputCostMicros))}</div>
             <span class="sub-line">${inTok !== null ? `${escapeHtml(inTok)} token` : renderNullableValue(null)}</span>
+            ${cachedTok ? `<span class="sub-line" style="color: #059669; font-weight: 700">Cache: ${escapeHtml(cachedTok)} tok (-75%)</span>` : ''}
           </td>
           <td class="num">
             <div>${renderNullableValue(formatMicrosToUsd(item.outputCostMicros))}</div>
@@ -310,24 +318,6 @@ function renderHistory() {
   }
 }
 
-function mergeLatestHistory(existing, incoming, incomingCursor) {
-  const prevById = new Map(existing.map((item) => [item.id, item]));
-  const incomingIds = new Set(incoming.map((item) => item.id));
-  const changed = new Set();
-
-  for (const item of incoming) {
-    const prev = prevById.get(item.id);
-    if (!prev || prev.status !== item.status || prev.chargedMicros !== item.chargedMicros) {
-      changed.add(item.id);
-    }
-  }
-
-  const olderTail = existing.filter((item) => !incomingIds.has(item.id));
-  const merged = [...incoming, ...olderTail].sort((a, b) => b.id - a.id);
-  const nextCursor = existing.length <= PAGE_LIMIT ? (incomingCursor ?? null) : state.nextCursor;
-  return { merged, nextCursor, changed };
-}
-
 function updateLiveToggleUi() {
   if (!dom.liveToggleBtn) return;
   dom.liveToggleBtn.setAttribute('aria-pressed', String(state.liveEnabled));
@@ -342,11 +332,13 @@ async function silentPollConsole() {
   state.pollInFlight = true;
   try {
     const selectedId = state.selectedKey?.id ?? null;
-    const requests = [apiFetch('/api/console/keys')];
-    if (selectedId) {
-      requests.push(apiFetch(`/api/console/keys/${encodeURIComponent(selectedId)}/requests?limit=${PAGE_LIMIT}`));
-    }
-    const [keysData, latestPage] = await Promise.all(requests);
+    const pollHistory = Boolean(selectedId) && !state.loadingMore;
+    const [keysData, latestPage] = await Promise.all([
+      apiFetch('/api/console/keys'),
+      pollHistory
+        ? apiFetch(`/api/console/keys/${encodeURIComponent(selectedId)}/requests?limit=${PAGE_LIMIT}`)
+        : Promise.resolve(null),
+    ]);
     state.user = keysData.user;
     state.keys = Array.isArray(keysData.items) ? keysData.items : [];
     if (selectedId) {
@@ -355,18 +347,31 @@ async function silentPollConsole() {
     }
     renderAccount();
     renderKeys();
-    if (latestPage && state.selectedKey && state.selectedKey.id === selectedId) {
-      const { merged, nextCursor, changed } = mergeLatestHistory(
+    if (pollHistory && !state.loadingMore && latestPage && state.selectedKey && state.selectedKey.id === selectedId) {
+      const prevTotal = state.historyTotal;
+      const nextTotal = Number.isSafeInteger(latestPage.total) ? latestPage.total : prevTotal;
+      const { merged, nextCursor, changed } = mergeRequestPages(
         state.history,
         Array.isArray(latestPage.items) ? latestPage.items : [],
-        latestPage.nextCursor ?? null,
+        {
+          pageLimit: PAGE_LIMIT,
+          incomingCursor: latestPage.nextCursor ?? null,
+          currentCursor: state.nextCursor,
+        },
       );
-      if (changed.size > 0 || merged.length !== state.history.length) {
+      const updated =
+        changed.size > 0
+        || merged.length !== state.history.length
+        || nextCursor !== state.nextCursor
+        || nextTotal !== prevTotal;
+      if (updated) {
         state.history = merged;
+        state.historyTotal = nextTotal;
         state.nextCursor = nextCursor;
         state.flashIds = changed;
         renderHistory();
-        setTimeout(() => {
+        clearTimeout(state.flashTimer);
+        state.flashTimer = setTimeout(() => {
           state.flashIds.clear();
         }, 1700);
       }
@@ -399,8 +404,12 @@ async function loadAll() {
   renderKeys();
   dom.loading.classList.add('hidden');
   dom.body.classList.remove('hidden');
-  if (!state.selectedKey && state.keys.length === 1) {
+  if (state.selectedKey) {
+    await openHistory(state.selectedKey);
+  } else if (state.keys.length === 1) {
     await openHistory(state.keys[0]);
+  } else {
+    renderHistory();
   }
 }
 
@@ -408,20 +417,26 @@ async function openHistory(key) {
   state.selectedKey = key;
   renderKeys();
   const page = await apiFetch(`/api/console/keys/${encodeURIComponent(key.id)}/requests?limit=${PAGE_LIMIT}`);
+  if (state.selectedKey?.id !== key.id) return;
   state.history = Array.isArray(page.items) ? page.items : [];
+  state.historyTotal = Number.isSafeInteger(page.total) ? page.total : state.history.length;
   state.nextCursor = page.nextCursor ?? null;
   renderHistory();
 }
 
 async function loadMoreHistory() {
   if (!state.selectedKey || state.nextCursor === null || state.loadingMore) return;
+  const keyId = state.selectedKey.id;
+  const cursor = state.nextCursor;
   state.loadingMore = true;
   renderHistory();
   try {
     const page = await apiFetch(
-      `/api/console/keys/${encodeURIComponent(state.selectedKey.id)}/requests?limit=${PAGE_LIMIT}&before=${encodeURIComponent(state.nextCursor)}`,
+      `/api/console/keys/${encodeURIComponent(keyId)}/requests?limit=${PAGE_LIMIT}&before=${encodeURIComponent(cursor)}`,
     );
-    state.history = [...state.history, ...(page.items ?? [])];
+    if (state.selectedKey?.id !== keyId) return;
+    state.history = appendRequestPage(state.history, page.items ?? []);
+    if (Number.isSafeInteger(page.total)) state.historyTotal = page.total;
     state.nextCursor = page.nextCursor ?? null;
   } finally {
     state.loadingMore = false;

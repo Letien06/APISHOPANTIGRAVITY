@@ -217,3 +217,81 @@ export function renderNullableValue(formattedValue, emptyText = 'Chưa có dữ 
   }
   return escapeHtml(formattedValue);
 }
+
+function hasRequestItemChanged(prev, next) {
+  return (
+    !prev
+    || prev.status !== next.status
+    || prev.chargedMicros !== next.chargedMicros
+    || prev.finishedAt !== next.finishedAt
+    || prev.httpStatus !== next.httpStatus
+    || prev.inputTokens !== next.inputTokens
+    || prev.outputTokens !== next.outputTokens
+    || prev.cachedTokens !== next.cachedTokens
+    || prev.estimated !== next.estimated
+  );
+}
+
+export function mergeRequestPages(existing, incoming, { pageLimit = 50, incomingCursor = null, currentCursor = null } = {}) {
+  const prevList = Array.isArray(existing) ? existing : [];
+  const nextList = Array.isArray(incoming) ? incoming : [];
+  const prevById = new Map(prevList.map((item) => [item.id, item]));
+  const changed = new Set();
+
+  for (const item of nextList) {
+    if (hasRequestItemChanged(prevById.get(item.id), item)) {
+      changed.add(item.id);
+    }
+  }
+
+  if (nextList.length === 0) {
+    return { merged: [], nextCursor: null, changed };
+  }
+
+  if (nextList.length < pageLimit) {
+    const merged = [...nextList].sort((a, b) => b.id - a.id);
+    return { merged, nextCursor: null, changed };
+  }
+
+  if (prevList.length === 0) {
+    const merged = [...nextList].sort((a, b) => b.id - a.id);
+    return { merged, nextCursor: incomingCursor ?? null, changed };
+  }
+
+  const hasOverlap = nextList.some((item) => prevById.has(item.id));
+  if (!hasOverlap) {
+    // >= pageLimit new requests arrived between polls; reset cleanly to avoid a silent middle gap.
+    const merged = [...nextList].sort((a, b) => b.id - a.id);
+    return { merged, nextCursor: incomingCursor ?? null, changed };
+  }
+
+  const incomingIds = new Set(nextList.map((item) => item.id));
+  const olderTail = prevList.filter((item) => !incomingIds.has(item.id));
+  const merged = [...nextList, ...olderTail].sort((a, b) => b.id - a.id);
+
+  let nextCursor;
+  if (olderTail.length > 0) {
+    nextCursor = currentCursor !== null ? merged[merged.length - 1].id : null;
+  } else {
+    nextCursor = incomingCursor ?? null;
+  }
+  return { merged, nextCursor, changed };
+}
+
+export function appendRequestPage(existing, incoming) {
+  const byId = new Map();
+  for (const item of existing ?? []) byId.set(item.id, item);
+  for (const item of incoming ?? []) {
+    if (!byId.has(item.id)) byId.set(item.id, item);
+  }
+  return [...byId.values()].sort((a, b) => b.id - a.id);
+}
+
+export function formatLoadedCount(loaded, total) {
+  const safeLoaded = Number.isFinite(loaded) ? loaded : 0;
+  const safeTotal = Number.isFinite(total) ? Math.max(safeLoaded, total) : safeLoaded;
+  if (safeTotal > safeLoaded) {
+    return `Đang hiện ${formatInteger(safeLoaded)} / ${formatInteger(safeTotal)} mục`;
+  }
+  return `${formatInteger(safeTotal)} mục`;
+}
