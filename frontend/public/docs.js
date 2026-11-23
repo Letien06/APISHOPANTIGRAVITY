@@ -23,12 +23,48 @@ const dom = {
   rooSample: document.getElementById('roocode-model-sample'),
   cursorSample: document.getElementById('cursor-model-sample'),
   opencodeRunSample: document.getElementById('opencode-run-sample'),
+  downloadCodexCatalogBtn: document.getElementById('download-codex-catalog-btn'),
   codeOpencode: document.getElementById('code-opencode'),
   codeCodex: document.getElementById('code-codex'),
   codePython: document.getElementById('code-python'),
   codeNode: document.getElementById('code-node'),
   codeShell: document.getElementById('code-shell'),
 };
+
+let currentModels = [...FALLBACK_MODELS];
+
+function buildCodexCatalogJson(items) {
+  const models = items.map((m, idx) => ({
+    slug: m.id,
+    display_name: m.id,
+    description: `TienCoder API · Vào ${formatMicrosToUsd(m.inputMicrosPerMillion)} · Cache 25% ${formatMicrosToUsd(m.cachedInputMicrosPerMillion ?? Math.round((m.inputMicrosPerMillion ?? 0) * 0.25))} · Ra ${formatMicrosToUsd(m.outputMicrosPerMillion)} / 1M`,
+    default_reasoning_level: 'high',
+    supported_reasoning_levels: [
+      { effort: 'low', description: 'Nhanh, tiết kiệm token' },
+      { effort: 'medium', description: 'Cân bằng tốc độ và độ chính xác' },
+      { effort: 'high', description: 'Suy luận sâu cho lập trình phức tạp' },
+      { effort: 'xhigh', description: 'Suy luận cực sâu cho bài toán khó' },
+    ],
+    shell_type: 'unified_exec',
+    visibility: 'list',
+    supported_in_api: true,
+    priority: idx + 1,
+    default_reasoning_summary: 'none',
+    support_verbosity: true,
+    default_verbosity: 'low',
+    apply_patch_tool_type: 'freeform',
+    truncation_policy: { mode: 'tokens', limit: 10000 },
+    supports_image_detail_original: true,
+    context_window: m.maxInputTokens ?? 131072,
+    max_context_window: m.maxInputTokens ?? 131072,
+    effective_context_window_percent: 95,
+    input_modalities: ['text', 'image'],
+    supports_search_tool: false,
+    use_responses_lite: false,
+    supports_reasoning_effort_updates: true,
+  }));
+  return JSON.stringify({ models }, null, 2);
+}
 
 function buildOpenCodeConfig(primaryModel, proModel, items) {
   const byId = new Map(items.map((m) => [m.id, m]));
@@ -98,16 +134,24 @@ function renderSnippets(primaryModel, proModel, items) {
     dom.codeOpencode.textContent = buildOpenCodeConfig(primaryModel, proModel, items);
   }
 
-  dom.codeCodex.textContent = `[model_providers.tiencoder]
+  dom.codeCodex.textContent = `# --- Đặt ở đầu file ~/.codex/config.toml ---
+model = "${proModel}"
+model_provider = "tiencoder"
+model_reasoning_effort = "high"
+model_catalog_json = 'C:\\Users\\<TenUser>\\.codex\\tiencoder-models.json'
+
+# --- Đặt ở cuối file ~/.codex/config.toml ---
+[model_providers.tiencoder]
 name = "TienCoder API"
 base_url = "${BASE_URL}"
 wire_api = "responses"
 requires_openai_auth = false
-env_key = "TIENCODER_API_KEY"
 
-[profiles.tiencoder]
-model_provider = "tiencoder"
-model = "${primaryModel}"`;
+[model_providers.tiencoder.http_headers]
+Authorization = "Bearer gw_KEY_CUA_BAN"
+
+[agents]
+default_subagent_model = "${primaryModel}"`;
 
   dom.codePython.textContent = `from openai import OpenAI
 
@@ -167,6 +211,7 @@ Invoke-RestMethod -Uri "${BASE_URL}/chat/completions" \`
 }
 
 function renderModels(items) {
+  currentModels = items;
   dom.modelsCount.textContent = `${items.length} model`;
   dom.modelsTbody.innerHTML = items
     .map(
@@ -221,6 +266,20 @@ document.querySelectorAll('.lang-tab[data-tool]').forEach((tab) => {
     });
   });
 });
+
+if (dom.downloadCodexCatalogBtn) {
+  dom.downloadCodexCatalogBtn.addEventListener('click', () => {
+    const blob = new Blob([buildCodexCatalogJson(currentModels)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tiencoder-models.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+}
 
 document.addEventListener('click', (event) => {
   const copyLiteralBtn = event.target.closest('button[data-copy-text]');
