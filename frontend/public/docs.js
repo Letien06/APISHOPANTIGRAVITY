@@ -7,10 +7,10 @@ const BASE_URL = 'https://api.tiencoder.tech/v1';
 const FALLBACK_MODELS = [
   {
     id: 'gemini-3.8-flash',
-    inputMicrosPerMillion: 300_000,
-    outputMicrosPerMillion: 2_500_000,
-    maxInputTokens: 32_768,
-    maxOutputTokens: 4_096,
+    inputMicrosPerMillion: 1_200_000,
+    outputMicrosPerMillion: 10_000_000,
+    maxInputTokens: 131_072,
+    maxOutputTokens: 32_768,
   },
 ];
 
@@ -70,6 +70,7 @@ function buildOpenCodeConfig(primaryModel, proModel, items) {
   const byId = new Map(items.map((m) => [m.id, m]));
   const preferredOrder = [
     proModel,
+    'gemini-4-carbon-high',
     'gemini-4-hydrogen-high',
     'gemini-4-hydrogen-xhigh',
     'gemini-4-neon-high',
@@ -234,8 +235,9 @@ function renderModels(items) {
     .join('');
 
   const flash = items.find((m) => m.id.includes('3.8-flash'))?.id ?? items[0].id;
-  const flagship = items.find((m) => m.id.includes('hydrogen-high'))?.id
-    ?? items.find((m) => m.id.includes('hydrogen') || m.id.includes('opus'))?.id
+  const flagship = items.find((m) => m.id.includes('carbon-high'))?.id
+    ?? items.find((m) => m.id.includes('hydrogen-high'))?.id
+    ?? items.find((m) => m.id.includes('carbon') || m.id.includes('hydrogen') || m.id.includes('opus'))?.id
     ?? flash;
   renderSnippets(flash, flagship, items);
 }

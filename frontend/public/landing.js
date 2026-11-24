@@ -6,11 +6,11 @@ const BASE_URL = 'https://api.tiencoder.tech/v1';
 
 const FALLBACK_MODELS = [
   {
-    id: 'ag/gemini-3.8-flash',
-    inputMicrosPerMillion: 300_000,
-    outputMicrosPerMillion: 2_500_000,
-    maxInputTokens: 32_768,
-    maxOutputTokens: 4_096,
+    id: 'gemini-3.8-flash',
+    inputMicrosPerMillion: 1_200_000,
+    outputMicrosPerMillion: 10_000_000,
+    maxInputTokens: 131_072,
+    maxOutputTokens: 32_768,
     chatOutputLimitField: 'max_tokens',
   },
 ];
