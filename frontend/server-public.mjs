@@ -21,16 +21,16 @@ const STATIC_ROUTES = new Map([
   ['/usage/', { file: join(PUBLIC_DIR, 'usage.html'), type: 'text/html; charset=utf-8', cache: 'no-store' }],
   ['/docs', { file: join(PUBLIC_DIR, 'docs.html'), type: 'text/html; charset=utf-8', cache: 'no-store' }],
   ['/docs/', { file: join(PUBLIC_DIR, 'docs.html'), type: 'text/html; charset=utf-8', cache: 'no-store' }],
-  ['/assets/passport.css', { file: join(SHARED_DIR, 'passport.css'), type: 'text/css; charset=utf-8', cache: 'no-cache' }],
-  ['/assets/format.js', { file: join(SHARED_DIR, 'format.js'), type: 'text/javascript; charset=utf-8', cache: 'no-cache' }],
-  ['/assets/landing.js', { file: join(PUBLIC_DIR, 'landing.js'), type: 'text/javascript; charset=utf-8', cache: 'no-cache' }],
-  ['/assets/auth.js', { file: join(PUBLIC_DIR, 'auth.js'), type: 'text/javascript; charset=utf-8', cache: 'no-cache' }],
-  ['/assets/console.js', { file: join(PUBLIC_DIR, 'console.js'), type: 'text/javascript; charset=utf-8', cache: 'no-cache' }],
-  ['/assets/docs.js', { file: join(PUBLIC_DIR, 'docs.js'), type: 'text/javascript; charset=utf-8', cache: 'no-cache' }],
-  ['/usage/assets/passport.css', { file: join(SHARED_DIR, 'passport.css'), type: 'text/css; charset=utf-8', cache: 'no-cache' }],
-  ['/usage/assets/usage.css', { file: join(PUBLIC_DIR, 'usage.css'), type: 'text/css; charset=utf-8', cache: 'no-cache' }],
-  ['/usage/assets/usage.js', { file: join(PUBLIC_DIR, 'usage.js'), type: 'text/javascript; charset=utf-8', cache: 'no-cache' }],
-  ['/usage/assets/format.js', { file: join(SHARED_DIR, 'format.js'), type: 'text/javascript; charset=utf-8', cache: 'no-cache' }],
+  ['/assets/passport.css', { file: join(SHARED_DIR, 'passport.css'), type: 'text/css; charset=utf-8', cache: 'no-store' }],
+  ['/assets/format.js', { file: join(SHARED_DIR, 'format.js'), type: 'text/javascript; charset=utf-8', cache: 'no-store' }],
+  ['/assets/landing.js', { file: join(PUBLIC_DIR, 'landing.js'), type: 'text/javascript; charset=utf-8', cache: 'no-store' }],
+  ['/assets/auth.js', { file: join(PUBLIC_DIR, 'auth.js'), type: 'text/javascript; charset=utf-8', cache: 'no-store' }],
+  ['/assets/console.js', { file: join(PUBLIC_DIR, 'console.js'), type: 'text/javascript; charset=utf-8', cache: 'no-store' }],
+  ['/assets/docs.js', { file: join(PUBLIC_DIR, 'docs.js'), type: 'text/javascript; charset=utf-8', cache: 'no-store' }],
+  ['/usage/assets/passport.css', { file: join(SHARED_DIR, 'passport.css'), type: 'text/css; charset=utf-8', cache: 'no-store' }],
+  ['/usage/assets/usage.css', { file: join(PUBLIC_DIR, 'usage.css'), type: 'text/css; charset=utf-8', cache: 'no-store' }],
+  ['/usage/assets/usage.js', { file: join(PUBLIC_DIR, 'usage.js'), type: 'text/javascript; charset=utf-8', cache: 'no-store' }],
+  ['/usage/assets/format.js', { file: join(SHARED_DIR, 'format.js'), type: 'text/javascript; charset=utf-8', cache: 'no-store' }],
   ['/favicon.ico', { file: join(SHARED_DIR, 'favicon.svg'), type: 'image/svg+xml', cache: 'public, max-age=3600' }],
   ['/assets/favicon.svg', { file: join(SHARED_DIR, 'favicon.svg'), type: 'image/svg+xml', cache: 'public, max-age=3600' }],
   ['/usage/assets/favicon.svg', { file: join(SHARED_DIR, 'favicon.svg'), type: 'image/svg+xml', cache: 'public, max-age=3600' }],
@@ -54,6 +54,14 @@ const ALLOWED_POST_PROXIES = new Set([
   '/v1/responses',
 ]);
 
+const ALLOWED_OPTIONS_PROXIES = new Set([
+  '/api/usage',
+  '/api/usage/requests',
+  '/v1/models',
+  '/v1/chat/completions',
+  '/v1/responses',
+]);
+
 function isAllowedConsoleKeyProxy(method, pathname) {
   const match = CONSOLE_KEY_ROUTE.exec(pathname);
   if (!match) return false;
@@ -65,7 +73,7 @@ function isAllowedConsoleKeyProxy(method, pathname) {
 export function createPublicFrontendServer({ gatewayOrigin = 'http://127.0.0.1:20129' } = {}) {
   const origin = new URL(gatewayOrigin).origin;
 
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const { pathname, search } = url;
 
@@ -77,6 +85,7 @@ export function createPublicFrontendServer({ gatewayOrigin = 'http://127.0.0.1:2
     if (
       (req.method === 'GET' && ALLOWED_GET_PROXIES.has(pathname))
       || (req.method === 'POST' && ALLOWED_POST_PROXIES.has(pathname))
+      || (req.method === 'OPTIONS' && ALLOWED_OPTIONS_PROXIES.has(pathname))
       || isAllowedConsoleKeyProxy(req.method, pathname)
     ) {
       return proxyToGateway(req, res, origin, `${pathname}${search}`);
@@ -85,6 +94,10 @@ export function createPublicFrontendServer({ gatewayOrigin = 'http://127.0.0.1:2
     // Strict deny-by-default: admin UI, admin assets, /admin/v1/*, /healthz, /dashboard all return 404.
     return sendNotFound(res);
   });
+  server.requestTimeout = 660_000;
+  server.headersTimeout = 60_000;
+  server.keepAliveTimeout = 65_000;
+  return server;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -95,4 +108,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   server.listen(port, host, () => {
     console.info(`Public portal listening on http://${host}:${port}/ -> ${gatewayOrigin}`);
   });
+  function shutdown() {
+    server.close();
+    server.closeIdleConnections?.();
+  }
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
 }

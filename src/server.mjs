@@ -9,6 +9,7 @@ import { proxyInference } from './upstream.mjs';
 
 const CHAT = '/v1/chat/completions';
 const RESPONSES = '/v1/responses';
+const CORS_API_PATHS = new Set(['/v1/models', CHAT, RESPONSES, '/api/usage', '/api/usage/requests']);
 const KEY_ROUTE = /^\/admin\/v1\/keys\/([\da-f-]{36})(\/requests|\/secret)?$/;
 const ADMIN_USER_ROUTE = /^\/admin\/v1\/users\/([\da-f-]{36})$/;
 const CONSOLE_KEY_ROUTE = /^\/api\/console\/keys\/([\da-f-]{36})(\/requests|\/secret)?$/;
@@ -68,15 +69,39 @@ function isSecureRequest(req) {
 }
 
 function sessionCookieHeader(req, token, maxAgeSeconds, cookieName = SESSION_COOKIE) {
+  const sameSite = cookieName === ADMIN_SESSION_COOKIE ? 'SameSite=Strict' : 'SameSite=Lax';
   const parts = [
     `${cookieName}=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
-    'SameSite=Lax',
+    sameSite,
     `Max-Age=${maxAgeSeconds}`,
   ];
   if (isSecureRequest(req)) parts.push('Secure');
   return parts.join('; ');
+}
+
+function assertSameOriginCsrf(req) {
+  const fetchSite = String(req.headers['sec-fetch-site'] ?? '').trim().toLowerCase();
+  if (fetchSite === 'cross-site') {
+    throw new HttpError(403, 'csrf_rejected', 'Yêu cầu cross-site không được phép.');
+  }
+  const originHeader = req.headers.origin;
+  if (originHeader) {
+    let originHost = '';
+    try {
+      originHost = new URL(originHeader).host.toLowerCase();
+    } catch {
+      throw new HttpError(403, 'csrf_rejected', 'Header Origin không hợp lệ.');
+    }
+    const expectedHost = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '')
+      .split(',')[0]
+      .trim()
+      .toLowerCase();
+    if (!expectedHost || originHost !== expectedHost) {
+      throw new HttpError(403, 'csrf_rejected', 'Nguồn yêu cầu không khớp với tên miền hệ thống.');
+    }
+  }
 }
 
 function hash(value) {
@@ -280,6 +305,9 @@ function inferenceBudget(body, endpoint, model) {
   return {
     inputReservedMicros: costMicros(model.maxInputTokens, model.inputMicrosPerMillion),
     outputReservedMicros: costMicros(outputTokens * choices, model.outputMicrosPerMillion),
+    field,
+    outputTokens,
+    choices,
   };
 }
 
@@ -321,10 +349,7 @@ function keyError(code) {
 
 function createAuthRateLimiter({ windowMs = 5 * 60_000, maxAttempts = 25 } = {}) {
   const buckets = new Map();
-  return function check(req) {
-    const forwarded = String(req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
-    const key = forwarded || req.socket.remoteAddress || 'local';
-    const now = Date.now();
+  function hit(key, now) {
     if (buckets.size > 500) {
       for (const [k, item] of buckets) {
         if (item.resetAt <= now) buckets.delete(k);
@@ -338,6 +363,17 @@ function createAuthRateLimiter({ windowMs = 5 * 60_000, maxAttempts = 25 } = {})
     entry.count += 1;
     if (entry.count > maxAttempts) {
       throw new HttpError(429, 'rate_limited', 'Quá nhiều lượt thử xác thực. Vui lòng chờ vài phút rồi thử lại.');
+    }
+  }
+  return function check(req, accountIdentifier = '') {
+    const now = Date.now();
+    // Trust Cloudflare edge IP when present; otherwise fall back to socket address (avoids trivial X-Forwarded-For spoofing).
+    const cfIp = String(req.headers['cf-connecting-ip'] ?? '').trim();
+    const ipKey = `ip:${cfIp || req.socket.remoteAddress || 'local'}`;
+    hit(ipKey, now);
+    const normalizedAcct = String(accountIdentifier ?? '').trim().toLowerCase();
+    if (normalizedAcct) {
+      hit(`acct:${normalizedAcct}`, now);
     }
   };
 }
@@ -381,6 +417,7 @@ export function createGateway({ config, store }) {
     }
 
     if (url.pathname === '/api/auth/logout' && req.method === 'POST') {
+      assertSameOriginCsrf(req);
       const token = readCookie(req, SESSION_COOKIE) || bearer(req);
       if (token) store.deleteSession(token);
       res.setHeader('set-cookie', sessionCookieHeader(req, '', 0));
@@ -389,9 +426,10 @@ export function createGateway({ config, store }) {
     }
 
     if (url.pathname === '/api/auth/register' && req.method === 'POST') {
-      checkAuthRate(req);
+      assertSameOriginCsrf(req);
       const body = await readObject(req, config.maxBodyBytes);
       const username = typeof body.username === 'string' ? body.username.trim() : '';
+      checkAuthRate(req, username);
       const email = typeof body.email === 'string' ? body.email.trim() : '';
       const password = typeof body.password === 'string' ? body.password : '';
       const providedInvite = typeof body.inviteCode === 'string' ? body.inviteCode.trim() : '';
@@ -425,10 +463,11 @@ export function createGateway({ config, store }) {
     }
 
     if (url.pathname === '/api/auth/login' && req.method === 'POST') {
-      checkAuthRate(req);
+      assertSameOriginCsrf(req);
       const body = await readObject(req, config.maxBodyBytes);
       const identifier = typeof body.identifier === 'string' ? body.identifier.trim() : '';
       const password = typeof body.password === 'string' ? body.password : '';
+      checkAuthRate(req, identifier);
       if (!identifier || !password) {
         throw badInput('Vui lòng nhập tên đăng nhập/email và mật khẩu.');
       }
@@ -448,6 +487,9 @@ export function createGateway({ config, store }) {
   }
 
   async function consoleRoutes(req, res, url) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      assertSameOriginCsrf(req);
+    }
     const { user } = authenticateSession(req);
 
     if (url.pathname === '/api/console/keys') {
@@ -483,7 +525,7 @@ export function createGateway({ config, store }) {
 
     if (req.method === 'PATCH') {
       const body = await readObject(req, config.maxBodyBytes);
-      const updated = store.updateUserKey(user.id, id, userKeyInput(body, config.models, false));
+      const updated = store.updateUserKey(user.id, id, userKeyInput(body, config.models, false), maxKeysPerUser);
       if (!updated) throw notFound();
       return json(res, 200, withStatus(updated));
     }
@@ -502,13 +544,14 @@ export function createGateway({ config, store }) {
 
   async function admin(req, res, url) {
     if (url.pathname === '/admin/v1/login' && req.method === 'POST') {
-      checkAdminLoginRate(req);
+      assertSameOriginCsrf(req);
       if (!adminPasswordHash) {
         throw new HttpError(403, 'admin_password_not_configured', 'Chưa cấu hình ADMIN_PASSWORD trên máy chủ. Hãy đăng nhập bằng ADMIN_TOKEN.');
       }
       const body = await readObject(req, config.maxBodyBytes);
       const username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
       const password = typeof body.password === 'string' ? body.password : '';
+      checkAdminLoginRate(req, username || 'admin');
       const userOk = Boolean(username) && timingSafeEqual(adminUsernameHash, hash(username));
       const passOk = Boolean(password) && timingSafeEqual(adminPasswordHash, hash(password));
       if (!userOk || !passOk) {
@@ -520,6 +563,7 @@ export function createGateway({ config, store }) {
     }
 
     if (url.pathname === '/admin/v1/logout' && req.method === 'POST') {
+      assertSameOriginCsrf(req);
       const token = readCookie(req, ADMIN_SESSION_COOKIE);
       if (token) store.deleteAdminSession(token);
       res.setHeader('set-cookie', sessionCookieHeader(req, '', 0, ADMIN_SESSION_COOKIE));
@@ -528,8 +572,13 @@ export function createGateway({ config, store }) {
     }
 
     const tokenOk = timingSafeEqual(adminHash, hash(bearer(req)));
-    if (!tokenOk && !hasValidAdminSession(req)) {
-      throw new HttpError(401, 'admin_required', 'Supply a valid administrator credential.');
+    if (!tokenOk) {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        assertSameOriginCsrf(req);
+      }
+      if (!hasValidAdminSession(req)) {
+        throw new HttpError(401, 'admin_required', 'Supply a valid administrator credential.');
+      }
     }
     if (url.pathname === '/admin/v1/models' && req.method === 'GET') {
       return json(res, 200, { items: [...config.models.values()] });
@@ -597,16 +646,33 @@ export function createGateway({ config, store }) {
     if (key.models !== null && !key.models.includes(body.model)) throw keyError('model_forbidden');
     const budget = inferenceBudget(body, endpoint, model);
     if (res.destroyed) return;
+    const minOutputSlice = Math.min(budget.outputTokens, 256);
+    const minOutputCost = costMicros(minOutputSlice * budget.choices, model.outputMicrosPerMillion) ?? 50_000;
+    const minReserveMicros = Math.max(50_000, minOutputCost);
     const job = store.reserve({
-      keyId: key.id, model: model.id, endpoint, ...budget,
+      keyId: key.id, model: model.id, endpoint,
+      inputReservedMicros: budget.inputReservedMicros,
+      outputReservedMicros: budget.outputReservedMicros,
       leaseExpiresAt: Date.now() + config.upstreamTimeoutMs + 60_000,
-      minReserveMicros: 50_000,
+      minReserveMicros,
     });
     if (job.error) throw keyError(job.error);
     const effectiveBudget = {
       inputReservedMicros: job.inputReservedMicros ?? budget.inputReservedMicros,
       outputReservedMicros: job.outputReservedMicros ?? budget.outputReservedMicros,
     };
+    // When bounded reservation is lower than worst-case projected cost, clamp upstream output token limit
+    // to what the reserved wallet balance can actually pay for, preventing runaway upstream cost losses.
+    const actualReserve = effectiveBudget.inputReservedMicros + effectiveBudget.outputReservedMicros;
+    const projectedCost = budget.inputReservedMicros + budget.outputReservedMicros;
+    if (actualReserve < projectedCost) {
+      const maxAffordableOutput = Number(
+        (BigInt(actualReserve) * 1_000_000n) / (BigInt(model.outputMicrosPerMillion) * BigInt(budget.choices)),
+      );
+      if (maxAffordableOutput >= 1 && maxAffordableOutput < budget.outputTokens) {
+        body[budget.field] = maxAffordableOutput;
+      }
+    }
 
     let observation;
     try {
@@ -632,6 +698,17 @@ export function createGateway({ config, store }) {
     try {
       const url = new URL(req.url, 'http://localhost');
       const { pathname } = url;
+      if (CORS_API_PATHS.has(pathname)) {
+        res.setHeader('access-control-allow-origin', '*');
+        res.setHeader('access-control-expose-headers', 'x-request-id, retry-after');
+        if (req.method === 'OPTIONS') {
+          res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
+          res.setHeader('access-control-allow-headers', 'authorization, content-type, accept, x-requested-with');
+          res.setHeader('access-control-max-age', '86400');
+          res.writeHead(204);
+          return res.end();
+        }
+      }
       if (pathname === '/healthz' && req.method === 'GET') return json(res, 200, { status: 'ok' });
       if (pathname === '/api/public/models' && req.method === 'GET') {
         return json(res, 200, {
@@ -684,6 +761,10 @@ export function createGateway({ config, store }) {
     const remove = () => running.delete(operation);
     operation.then(remove, remove);
   });
+  const serverRequestTimeout = Math.max(360_000, (config.upstreamTimeoutMs ?? 600_000) + 60_000);
+  server.requestTimeout = serverRequestTimeout;
+  server.headersTimeout = Math.min(60_000, serverRequestTimeout);
+  server.keepAliveTimeout = 65_000;
   server.waitForRequests = () => Promise.allSettled(running);
   return server;
 }
@@ -704,6 +785,7 @@ function start() {
       await server.waitForRequests();
       store.close();
     });
+    server.closeIdleConnections?.();
   }
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);

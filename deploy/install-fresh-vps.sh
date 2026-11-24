@@ -180,9 +180,9 @@ printf '  Gateway API         : 127.0.0.1:20129 (HTTP %s)\n' "$(curl -s -o /dev/
 printf '  Admin Manage UI     : 127.0.0.1:20131 (HTTP %s)\n' "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:20131/ || true)"
 printf '  Public Portal UI    : 127.0.0.1:20132 (HTTP %s)\n' "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:20132/ || true)"
 echo "------------------------------------------------------------------"
-echo "  Dang nhap manage.tiencoder.tech : user=${ADMIN_USERNAME} / pass=${ADMIN_PASSWORD}"
-echo "  Dang nhap admin.tiencoder.tech  : pass=${WEB_PASSWORD}"
-echo "  Luu tru thong tin bi mat tai    : /opt/9router-gateway/.env"
+echo "  Dang nhap manage.tiencoder.tech : user=${ADMIN_USERNAME} (xem ADMIN_PASSWORD trong /opt/9router-gateway/.env)"
+echo "  Dang nhap admin.tiencoder.tech  : xem WEB_PASSWORD trong /opt/antigravity-manager/.env"
+echo "  Luu tru thong tin bi mat tai    : /opt/9router-gateway/.env (quyen 600)"
 if [[ -z "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]]; then
   echo "------------------------------------------------------------------"
   echo "  BUOC CUOI: Chay lenh ket noi Cloudflare Tunnel (lay trong"

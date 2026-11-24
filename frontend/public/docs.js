@@ -33,12 +33,28 @@ const dom = {
 
 let currentModels = [...FALLBACK_MODELS];
 
+function formatCodexDisplayName(id) {
+  return String(id)
+    .replaceAll('5-5', '5.5')
+    .split('-')
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(' ');
+}
+
+function inferCodexReasoningLevel(id) {
+  const lower = String(id).toLowerCase();
+  if (lower.endsWith('-xhigh')) return 'xhigh';
+  if (lower.endsWith('-low')) return 'low';
+  if (lower.endsWith('-medium') || lower.includes('flash')) return 'medium';
+  return 'high';
+}
+
 function buildCodexCatalogJson(items) {
   const models = items.map((m, idx) => ({
     slug: m.id,
-    display_name: m.id,
+    display_name: formatCodexDisplayName(m.id),
     description: `TienCoder API · Vào ${formatMicrosToUsd(m.inputMicrosPerMillion)} · Cache 25% ${formatMicrosToUsd(m.cachedInputMicrosPerMillion ?? Math.round((m.inputMicrosPerMillion ?? 0) * 0.25))} · Ra ${formatMicrosToUsd(m.outputMicrosPerMillion)} / 1M`,
-    default_reasoning_level: 'high',
+    default_reasoning_level: inferCodexReasoningLevel(m.id),
     supported_reasoning_levels: [
       { effort: 'low', description: 'Nhanh, tiết kiệm token' },
       { effort: 'medium', description: 'Cân bằng tốc độ và độ chính xác' },
@@ -139,6 +155,7 @@ function renderSnippets(primaryModel, proModel, items) {
 model = "${proModel}"
 model_provider = "tiencoder"
 model_reasoning_effort = "high"
+# Windows: dùng đường dẫn đầy đủ bên dưới · macOS/Linux: đổi thành '/home/<user>/.codex/tiencoder-models.json' hoặc '/Users/<user>/.codex/tiencoder-models.json'
 model_catalog_json = 'C:\\Users\\<TenUser>\\.codex\\tiencoder-models.json'
 
 # --- Đặt ở cuối file ~/.codex/config.toml ---

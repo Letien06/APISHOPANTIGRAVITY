@@ -130,12 +130,39 @@ let req = CreateChatCompletionRequestArgs::default()
   };
 }
 
+function getHeroShowcaseModels() {
+  const preferred = [
+    'gemini-4-carbon-high',
+    'gemini-4-hydrogen-high',
+    'gemini-4-neon-high',
+    'gemini-3.8-flash',
+    'claude-opus-5-5-high',
+    'claude-sonnet-5-5-high',
+  ];
+  const byId = new Map(models.map((m, idx) => [m.id, idx]));
+  const picked = [];
+  for (const id of preferred) {
+    if (byId.has(id) && !picked.includes(byId.get(id))) {
+      picked.push(byId.get(id));
+    }
+  }
+  for (let i = 0; i < models.length && picked.length < 6; i += 1) {
+    if (!picked.includes(i)) picked.push(i);
+  }
+  return picked;
+}
+
 function renderPassportTicket() {
+  const showcaseIndices = getHeroShowcaseModels();
+  if (!showcaseIndices.includes(activeModelIndex) && showcaseIndices.length > 0) {
+    activeModelIndex = showcaseIndices[0];
+  }
   const current = models[activeModelIndex] ?? models[0];
-  dom.passportModelTabs.innerHTML = models
-    .slice(0, 6)
+  dom.passportModelTabs.innerHTML = showcaseIndices
     .map(
-      (model, index) => `
+      (index) => {
+        const model = models[index];
+        return `
       <button
         type="button"
         class="model-tab-btn ${index === activeModelIndex ? 'active' : ''}"
@@ -145,7 +172,8 @@ function renderPassportTicket() {
       >
         ${escapeHtml(shortLabel(model.id))}
       </button>
-    `,
+    `;
+      },
     )
     .join('');
 

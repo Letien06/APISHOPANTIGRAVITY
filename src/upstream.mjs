@@ -1,3 +1,6 @@
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+
 const MAX_OBSERVATION_CHARS = 8 * 1024 * 1024;
 
 const upstreamMessages = {
@@ -240,9 +243,77 @@ async function readJsonResponse(body) {
   return { bytes, value };
 }
 
+function openUpstreamRequest(url, { key, streaming, payload, signal }) {
+  const target = url instanceof URL ? url : new URL(url);
+  const transport = target.protocol === 'https:' ? httpsRequest : httpRequest;
+  const serialized = Buffer.from(JSON.stringify(payload), 'utf8');
+
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error('Upstream request aborted'));
+      return;
+    }
+
+    let settled = false;
+    const req = transport(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          'Content-Length': String(serialized.length),
+          Accept: streaming ? 'text/event-stream, application/json' : 'application/json',
+        },
+      },
+      (upstreamRes) => {
+        if (settled) {
+          upstreamRes.destroy();
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve({ upstreamReq: req, upstreamRes });
+      },
+    );
+
+    function onAbort() {
+      const err = signal?.reason ?? new Error('Upstream request aborted');
+      req.destroy(err);
+      if (!settled) {
+        settled = true;
+        cleanup();
+        reject(err);
+      }
+    }
+
+    function onError(err) {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        reject(err);
+      }
+    }
+
+    function cleanup() {
+      signal?.removeEventListener('abort', onAbort);
+      req.off('error', onError);
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+    req.on('error', onError);
+    // Disable socket inactivity timeout so long-thinking models rely strictly on AbortSignal (up to UPSTREAM_TIMEOUT_MS).
+    req.setTimeout(0);
+    req.end(serialized);
+  });
+}
+
 /**
  * Forward an inference request and observe usage without transforming its response.
- * The signal controls upstream work even when the downstream client disconnects.
+ * Uses node:http/https directly to avoid Undici's hardcoded 5-minute headers/body timeout.
  */
 export async function proxyInference({ res, url, key, body, signal, requestId, endpoint }) {
   const chat = endpoint === '/v1/chat/completions';
@@ -255,30 +326,37 @@ export async function proxyInference({ res, url, key, body, signal, requestId, e
     : body;
 
   let observation;
+  let upstreamRes;
+  let onStreamAbort;
   try {
-    const upstream = await fetch(url, {
-      method: 'POST',
-      redirect: 'error',
-      signal,
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-        Accept: streaming ? 'text/event-stream, application/json' : 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+    const opened = await openUpstreamRequest(url, { key, streaming, payload, signal });
+    upstreamRes = opened.upstreamRes;
+    onStreamAbort = () => upstreamRes?.destroy(signal?.reason ?? new Error('Upstream request aborted'));
+    signal?.addEventListener('abort', onStreamAbort, { once: true });
 
-    if (!upstream.ok) {
-      upstream.body?.cancel().catch(() => {});
-      sendError(res, upstream.status, requestId, safeRetryAfter(upstream.headers.get('retry-after')));
-      return { httpStatus: upstream.status, status: 'upstream_error', inputTokens: null, outputTokens: null };
+    const upstreamStatus = upstreamRes.statusCode ?? 502;
+    if (upstreamStatus >= 300 && upstreamStatus < 400) {
+      upstreamRes.resume();
+      sendError(res, 502, requestId);
+      return { httpStatus: 502, status: 'upstream_error', inputTokens: null, outputTokens: null };
+    }
+    if (upstreamStatus < 200 || upstreamStatus >= 400) {
+      upstreamRes.resume();
+      const rawRetryAfter = Array.isArray(upstreamRes.headers['retry-after'])
+        ? upstreamRes.headers['retry-after'][0]
+        : upstreamRes.headers['retry-after'];
+      sendError(res, upstreamStatus, requestId, safeRetryAfter(rawRetryAfter));
+      return { httpStatus: upstreamStatus, status: 'upstream_error', inputTokens: null, outputTokens: null };
     }
 
-    const mediaType = upstream.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+    const rawContentType = Array.isArray(upstreamRes.headers['content-type'])
+      ? upstreamRes.headers['content-type'][0]
+      : upstreamRes.headers['content-type'];
+    const mediaType = rawContentType?.split(';', 1)[0].trim().toLowerCase();
     const sse = mediaType === 'text/event-stream';
-    observation = createObservation(upstream.status, chat, sse);
+    observation = createObservation(upstreamStatus, chat, sse);
     if (!sse) {
-      const { bytes, value } = await readJsonResponse(upstream.body);
+      const { bytes, value } = await readJsonResponse(upstreamRes);
       observation.accept(value);
       const result = observation.result();
       if (result.status === 'upstream_error') {
@@ -286,7 +364,7 @@ export async function proxyInference({ res, url, key, body, signal, requestId, e
         return { ...result, httpStatus: 502 };
       }
       if (downstreamOpen(res)) {
-        setResponseHeaders(res, upstream.status, 'application/json; charset=utf-8', requestId);
+        setResponseHeaders(res, upstreamStatus, 'application/json; charset=utf-8', requestId);
         res.write(bytes);
       }
       return result;
@@ -294,16 +372,14 @@ export async function proxyInference({ res, url, key, body, signal, requestId, e
 
     const parser = createSseParser(observation.accept);
     if (downstreamOpen(res)) {
-      setResponseHeaders(res, upstream.status, 'text/event-stream; charset=utf-8', requestId);
+      setResponseHeaders(res, upstreamStatus, 'text/event-stream; charset=utf-8', requestId);
       res.flushHeaders();
     }
 
-    if (upstream.body) {
-      for await (const chunk of upstream.body) {
-        parser.write(chunk);
-        if (downstreamOpen(res) && !res.write(chunk)) await waitForDrain(res, signal);
-        signal?.throwIfAborted();
-      }
+    for await (const chunk of upstreamRes) {
+      parser.write(chunk);
+      if (downstreamOpen(res) && !res.write(chunk)) await waitForDrain(res, signal);
+      signal?.throwIfAborted();
     }
 
     parser.end();
@@ -318,6 +394,13 @@ export async function proxyInference({ res, url, key, body, signal, requestId, e
         ?? { httpStatus: res.statusCode, status: 'transport_error', inputTokens: null, outputTokens: null };
     }
     sendError(res, status, requestId);
+    // If connection failed before upstream returned any HTTP response headers (e.g. ECONNREFUSED during restart),
+    // mark as upstream_error so accounting refunds 100% of the reservation instead of charging the user.
+    if (!observation && !signal?.aborted) {
+      return { httpStatus: status, status: 'upstream_error', inputTokens: null, outputTokens: null };
+    }
     return { httpStatus: status, status: 'transport_error', inputTokens: null, outputTokens: null };
+  } finally {
+    if (onStreamAbort) signal?.removeEventListener('abort', onStreamAbort);
   }
 }

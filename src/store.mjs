@@ -259,6 +259,7 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
     const userKeyAggregates = db.prepare(`
       SELECT
         COUNT(*) AS key_count,
+        COALESCE(SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END), 0) AS active_key_count,
         COALESCE(SUM(used_micros), 0) AS used_micros,
         COALESCE(SUM(reserved_micros), 0) AS reserved_micros,
         COALESCE(SUM(request_count), 0) AS request_count
@@ -297,6 +298,7 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
         reservedMicros,
         remainingMicros: Math.max(0, owner.quota_micros - usedMicros - reservedMicros),
         keyCount: Number(agg?.key_count ?? 0),
+        activeKeyCount: Number(agg?.active_key_count ?? 0),
         requestCount: Number(agg?.request_count ?? 0),
       }
     }
@@ -356,6 +358,7 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
         remainingMicros: Math.max(0, row.quota_micros - usedMicros - reservedMicros),
         requestCount: Number(agg?.request_count ?? 0),
         keyCount: Number(agg?.key_count ?? 0),
+        activeKeyCount: Number(agg?.active_key_count ?? 0),
         createdAt: row.created_at,
       }
     }
@@ -634,9 +637,14 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           const owner = getUserById.get(userId)
           if (!owner || !owner.enabled) throw storeError('account_disabled', 'Tài khoản đã bị vô hiệu hóa.')
           const agg = userKeyAggregates.get(userId)
-          const keyCount = Number(agg?.key_count ?? 0)
-          if (keyCount >= maxKeysPerUser) {
-            throw storeError('max_keys_reached', `Mỗi tài khoản chỉ được tạo tối đa ${maxKeysPerUser} khóa.`)
+          const activeKeyCount = Number(agg?.active_key_count ?? 0)
+          const totalKeyCount = Number(agg?.key_count ?? 0)
+          const hardTotalLimit = Math.max(maxKeysPerUser * 4, 20)
+          if (activeKeyCount >= maxKeysPerUser) {
+            throw storeError('max_keys_reached', `Mỗi tài khoản chỉ được bật tối đa ${maxKeysPerUser} khóa hoạt động. Hãy vô hiệu hóa khóa cũ trước khi tạo mới.`)
+          }
+          if (totalKeyCount >= hardTotalLimit) {
+            throw storeError('max_keys_reached', `Tài khoản đã chạm trần lưu trữ lịch sử ${hardTotalLimit} khóa.`)
           }
           const key = `gw_${randomBytes(32).toString('base64url')}`
           const encrypted = encryptSecret(key, vaultKey)
@@ -646,13 +654,20 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           return { key, ...summarize(row) }
         })
       },
-      updateUserKey(userId, keyId, patch) {
+      updateUserKey(userId, keyId, patch, maxKeysPerUser = null) {
         return transaction(() => {
           recoverStale(Date.now())
           const owner = getUserById.get(userId)
           if (!owner || !owner.enabled) throw storeError('account_disabled', 'Tài khoản đã bị vô hiệu hóa.')
           const row = getKeyRow.get(keyId)
           if (!row || row.user_id !== userId) return null
+          if (patch.enabled === true && !row.enabled && maxKeysPerUser !== null) {
+            const agg = userKeyAggregates.get(userId)
+            const activeKeyCount = Number(agg?.active_key_count ?? 0)
+            if (activeKeyCount >= maxKeysPerUser) {
+              throw storeError('max_keys_reached', `Bạn đã bật đủ ${maxKeysPerUser} khóa hoạt động. Hãy tắt bớt một khóa trước khi bật lại khóa này.`)
+            }
+          }
           return summarize(writeKey.get(
             patch.name ?? row.name,
             row.quota_micros,

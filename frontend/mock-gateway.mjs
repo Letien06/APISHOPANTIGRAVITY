@@ -18,26 +18,29 @@ export const MOCK_CREDENTIALS = {
 const DEFAULT_MODELS = [
   {
     id: 'ag/gemini-3.8-flash',
-    inputMicrosPerMillion: 300_000,
-    outputMicrosPerMillion: 2_500_000,
-    maxInputTokens: 32_768,
-    maxOutputTokens: 4_096,
+    inputMicrosPerMillion: 1_200_000,
+    cachedInputMicrosPerMillion: 300_000,
+    outputMicrosPerMillion: 10_000_000,
+    maxInputTokens: 131_072,
+    maxOutputTokens: 32_768,
     chatOutputLimitField: 'max_tokens',
   },
   {
     id: 'ag/gemini-4-argon-medium',
-    inputMicrosPerMillion: 1_250_000,
-    outputMicrosPerMillion: 10_000_000,
-    maxInputTokens: 65_536,
-    maxOutputTokens: 8_192,
+    inputMicrosPerMillion: 7_200_000,
+    cachedInputMicrosPerMillion: 1_800_000,
+    outputMicrosPerMillion: 46_000_000,
+    maxInputTokens: 131_072,
+    maxOutputTokens: 65_536,
     chatOutputLimitField: 'max_tokens',
   },
   {
     id: 'ag/gemini-3.1-pro-high',
-    inputMicrosPerMillion: 1_250_000,
-    outputMicrosPerMillion: 10_000_000,
-    maxInputTokens: 65_536,
-    maxOutputTokens: 8_192,
+    inputMicrosPerMillion: 8_000_000,
+    cachedInputMicrosPerMillion: 2_000_000,
+    outputMicrosPerMillion: 48_000_000,
+    maxInputTokens: 131_072,
+    maxOutputTokens: 65_536,
     chatOutputLimitField: 'max_tokens',
   },
 ];
@@ -454,6 +457,15 @@ export function createMockGateway({ adminToken = MOCK_CREDENTIALS.adminToken } =
 
       if (pathname === '/healthz' && req.method === 'GET') {
         return json(res, 200, { status: 'ok' });
+      }
+
+      if (pathname === '/api/public/models' && req.method === 'GET') {
+        return json(res, 200, {
+          inviteRequired: false,
+          defaultUserQuotaMicros: 1_000_000,
+          maxKeysPerUser: 5,
+          items: data.models,
+        });
       }
 
       if (pathname.startsWith('/admin/v1/')) {

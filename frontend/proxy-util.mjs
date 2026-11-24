@@ -53,6 +53,9 @@ export function proxyToGateway(req, res, targetOrigin, pathAndSearch) {
     headers[lower] = value;
   }
   headers.host = target.host;
+  if (!headers['x-forwarded-host'] && req.headers.host) {
+    headers['x-forwarded-host'] = req.headers.host;
+  }
 
   const upstream = transport(
     {

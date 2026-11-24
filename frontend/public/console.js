@@ -159,8 +159,9 @@ function renderAccount() {
   dom.accUsed.textContent = formatMicrosToUsd(u.usedMicros) ?? '$0.00';
   dom.accReserved.textContent = formatMicrosToUsd(u.reservedMicros) ?? '$0.00';
   dom.accRemaining.textContent = formatMicrosToUsd(remainingMicros) ?? '$0.00';
-  dom.keysLimitNote.textContent = `Đang dùng ${u.keyCount}/${u.maxKeys} khóa · Tất cả khóa dùng chung số dư ví ${formatMicrosToUsd(remainingMicros)}`;
-  dom.openCreateBtn.disabled = u.keyCount >= u.maxKeys;
+  const activeKeyCount = u.activeKeyCount ?? u.keyCount;
+  dom.keysLimitNote.textContent = `Đang bật ${activeKeyCount}/${u.maxKeys} khóa hoạt động (tổng ${u.keyCount} khóa) · Tất cả khóa dùng chung số dư ví ${formatMicrosToUsd(remainingMicros)}`;
+  dom.openCreateBtn.disabled = activeKeyCount >= u.maxKeys;
 }
 
 function renderModels() {

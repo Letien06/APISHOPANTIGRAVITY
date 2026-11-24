@@ -158,7 +158,7 @@ test('Public origin strictly isolates /usage and blocks all admin UI, assets, an
       const res = await fetch(`${publicOrigin}${path}`);
       assert.equal(res.status, 200, `Expected 200 for ${path}`);
       if (path.endsWith('.js') || path.endsWith('.css')) {
-        assert.equal(res.headers.get('cache-control'), 'no-cache', `Expected no-cache for ${path}`);
+        assert.equal(res.headers.get('cache-control'), 'no-store', `Expected no-store for ${path}`);
       }
     }
 
@@ -623,7 +623,9 @@ test('Full user registration, login, shared-wallet multi-key console, key copy s
       body: JSON.stringify({ username: 'admin', password: 'TestAdminPass@2026' }),
     });
     assert.equal(okAdminLogin.status, 200);
-    const adminCookie = (okAdminLogin.headers.get('set-cookie') ?? '').split(';')[0];
+    const adminSetCookie = okAdminLogin.headers.get('set-cookie') ?? '';
+    assert.match(adminSetCookie, /SameSite=Strict/i);
+    const adminCookie = adminSetCookie.split(';')[0];
     assert.match(adminCookie, /^tc_admin_session=adm_/);
 
     const cookieUsersRes = await fetch(`${adminOrigin}/admin/v1/users`, {
@@ -637,6 +639,170 @@ test('Full user registration, login, shared-wallet multi-key console, key copy s
     });
     assert.equal(adminLogoutRes.status, 204);
     assert.equal((await fetch(`${adminOrigin}/admin/v1/users`, { headers: { Cookie: adminCookie } })).status, 401);
+  } finally {
+    await closeServer(publicServer);
+    await closeServer(adminServer);
+    await closeServer(gateway);
+    store.close();
+  }
+});
+
+test('CSRF origin protection, active-key slot reuse after disable, invite code enforcement, CORS proxy, and per-account rate limiting', async () => {
+  const adminToken = 'test_admin_token_32_characters_minimum_0002';
+  const store = createStore(':memory:', { encryptionSecret: adminToken });
+  const gateway = createGateway({
+    config: {
+      adminToken,
+      adminUsername: 'admin',
+      adminPassword: 'TestAdminPass@2026',
+      routerApiKey: 'test_router_key',
+      routerOrigin: 'http://127.0.0.1:1',
+      models: new Map([
+        [
+          'gemini-3.8-flash',
+          {
+            id: 'gemini-3.8-flash',
+            inputMicrosPerMillion: 1_200_000,
+            cachedInputMicrosPerMillion: 300_000,
+            outputMicrosPerMillion: 10_000_000,
+            maxInputTokens: 131_072,
+            maxOutputTokens: 32_768,
+            chatOutputLimitField: 'max_tokens',
+          },
+        ],
+      ]),
+      upstreamTimeoutMs: 5_000,
+      maxBodyBytes: 1_048_576,
+      defaultUserQuotaMicros: 1_000_000,
+      maxKeysPerUser: 2,
+      sessionTtlMs: 3_600_000,
+      inviteCode: 'VIP-2026',
+    },
+    store,
+  });
+
+  const gwOrigin = await listenEphemeral(gateway);
+  const publicServer = createPublicFrontendServer({ gatewayOrigin: gwOrigin });
+  const adminServer = createAdminFrontendServer({ gatewayOrigin: gwOrigin });
+  const publicOrigin = await listenEphemeral(publicServer);
+  const adminOrigin = await listenEphemeral(adminServer);
+
+  try {
+    // Public origin forwards CORS OPTIONS preflight for /v1/*
+    const corsRes = await fetch(`${publicOrigin}/v1/chat/completions`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://chat.example', 'Access-Control-Request-Method': 'POST' },
+    });
+    assert.equal(corsRes.status, 204);
+    assert.equal(corsRes.headers.get('access-control-allow-origin'), '*');
+
+    // Invite code enforcement
+    const badInvite = await fetch(`${publicOrigin}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'vip_user', email: 'vip@example.com', password: 'StrongPassword123!', inviteCode: 'WRONG' }),
+    });
+    assert.equal(badInvite.status, 403);
+    assert.equal((await badInvite.json()).error.code, 'invalid_invite_code');
+
+    const okReg = await fetch(`${publicOrigin}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: publicOrigin },
+      body: JSON.stringify({ username: 'vip_user', email: 'vip@example.com', password: 'StrongPassword123!', inviteCode: 'VIP-2026' }),
+    });
+    assert.equal(okReg.status, 201);
+    const cookie = (okReg.headers.get('set-cookie') ?? '').split(';')[0];
+
+    // Cross-origin CSRF blocked with 403
+    const csrfOrigin = await fetch(`${publicOrigin}/api/console/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: 'https://evil.example' },
+      body: JSON.stringify({ name: 'Evil', expiresAt: null, models: null }),
+    });
+    assert.equal(csrfOrigin.status, 403);
+    assert.equal((await csrfOrigin.json()).error.code, 'csrf_rejected');
+
+    const csrfFetchSite = await fetch(`${publicOrigin}/api/console/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Sec-Fetch-Site': 'cross-site' },
+      body: JSON.stringify({ name: 'Evil2', expiresAt: null, models: null }),
+    });
+    assert.equal(csrfFetchSite.status, 403);
+
+    // Same-origin create 2 active keys -> 3rd blocked -> disable 1st -> creating 3rd succeeds -> re-enabling 1st blocked!
+    const k1 = await (await fetch(`${publicOrigin}/api/console/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: publicOrigin },
+      body: JSON.stringify({ name: 'Key 1', expiresAt: null, models: null }),
+    })).json();
+    const k2 = await (await fetch(`${publicOrigin}/api/console/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: publicOrigin },
+      body: JSON.stringify({ name: 'Key 2', expiresAt: null, models: null }),
+    })).json();
+    assert.ok(k1.id && k2.id);
+
+    const k3Blocked = await fetch(`${publicOrigin}/api/console/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: publicOrigin },
+      body: JSON.stringify({ name: 'Key 3', expiresAt: null, models: null }),
+    });
+    assert.equal(k3Blocked.status, 409);
+
+    // Disable Key 1 -> frees an active slot
+    assert.equal((await fetch(`${publicOrigin}/api/console/keys/${k1.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: cookie, Origin: publicOrigin },
+    })).status, 204);
+
+    // Now creating Key 3 succeeds!
+    const k3Ok = await fetch(`${publicOrigin}/api/console/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: publicOrigin },
+      body: JSON.stringify({ name: 'Key 3 Fresh', expiresAt: null, models: null }),
+    });
+    assert.equal(k3Ok.status, 201);
+
+    // Re-enabling Key 1 while 2 keys are already active returns 409 max_keys_reached
+    const reenableBlocked = await fetch(`${publicOrigin}/api/console/keys/${k1.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: publicOrigin },
+      body: JSON.stringify({ enabled: true }),
+    });
+    assert.equal(reenableBlocked.status, 409);
+    assert.equal((await reenableBlocked.json()).error.code, 'max_keys_reached');
+
+    // Admin cookie CSRF protection
+    const admLogin = await fetch(`${adminOrigin}/admin/v1/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: adminOrigin },
+      body: JSON.stringify({ username: 'admin', password: 'TestAdminPass@2026' }),
+    });
+    assert.equal(admLogin.status, 200);
+    const admCookie = (admLogin.headers.get('set-cookie') ?? '').split(';')[0];
+
+    const admCsrf = await fetch(`${adminOrigin}/admin/v1/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: admCookie, Origin: 'https://evil.example' },
+      body: JSON.stringify({ name: 'CSRF Admin Key', quotaMicros: 1000 }),
+    });
+    assert.equal(admCsrf.status, 403);
+    assert.equal((await admCsrf.json()).error.code, 'csrf_rejected');
+
+    // Per-account rate limit blocks brute-force on admin even if CF-Connecting-IP rotates every request
+    let sawRateLimit = false;
+    for (let i = 0; i < 16; i += 1) {
+      const r = await fetch(`${adminOrigin}/admin/v1/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': `198.51.100.${i + 1}` },
+        body: JSON.stringify({ username: 'admin', password: `wrong-${i}` }),
+      });
+      if (r.status === 429) {
+        sawRateLimit = true;
+        break;
+      }
+    }
+    assert.equal(sawRateLimit, true);
   } finally {
     await closeServer(publicServer);
     await closeServer(adminServer);

@@ -46,7 +46,7 @@ export function assertLoopbackHost(host) {
 export function createAdminFrontendServer({ gatewayOrigin = 'http://127.0.0.1:20129' } = {}) {
   const origin = new URL(gatewayOrigin).origin;
 
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const { pathname, search } = url;
 
@@ -61,6 +61,10 @@ export function createAdminFrontendServer({ gatewayOrigin = 'http://127.0.0.1:20
 
     return sendNotFound(res);
   });
+  server.requestTimeout = 660_000;
+  server.headersTimeout = 60_000;
+  server.keepAliveTimeout = 65_000;
+  return server;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -72,4 +76,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   server.listen(port, host, () => {
     console.info(`Private admin frontend listening on http://${host}:${port}/ -> ${gatewayOrigin}`);
   });
+  function shutdown() {
+    server.close();
+    server.closeIdleConnections?.();
+  }
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
 }

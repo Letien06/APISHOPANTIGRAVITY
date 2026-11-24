@@ -325,3 +325,143 @@ test('a $1 starter wallet can call high-cap models via bounded reservation witho
     store.close();
   }
 });
+
+test('bounded reservation clamps upstream output tokens to wallet balance and blocks dust wallets on expensive models', async (t) => {
+  const calls = [];
+  const upstream = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks));
+    calls.push(body);
+    respond(res, {
+      choices: [{ message: { content: 'ok' } }],
+      usage: { prompt_tokens: 100, completion_tokens: 50 },
+    });
+  });
+  const routerOrigin = await listen(upstream);
+  const store = createStore(':memory:');
+  const opus = {
+    id: 'claude-opus-5-5',
+    inputMicrosPerMillion: 128_000_000,
+    outputMicrosPerMillion: 640_000_000,
+    cachedInputMicrosPerMillion: 32_000_000,
+    maxInputTokens: 131_072,
+    maxOutputTokens: 32_768,
+    chatOutputLimitField: 'max_tokens',
+  };
+  const gateway = createGateway({
+    config: {
+      adminToken, routerApiKey, routerOrigin, upstreamTimeoutMs: 5_000, maxBodyBytes: 65_536,
+      models: new Map([[opus.id, opus]]),
+    },
+    store,
+  });
+  const origin = await listen(gateway);
+  t.after(async () => {
+    await Promise.all([gateway, upstream].map((s) => new Promise((r) => s.close(r))));
+    await gateway.waitForRequests();
+    store.close();
+  });
+
+  const dust = store.createKey({ name: 'Dust', quotaMicros: 50_000, models: null });
+  const starter = store.createKey({ name: 'Starter', quotaMicros: 1_000_000, models: null });
+  const whale = store.createKey({ name: 'Whale', quotaMicros: 50_000_000, models: null });
+
+  const postChat = (key) => fetch(`${origin}${chat}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: opus.id, messages: [{ role: 'user', content: 'hi' }] }),
+  });
+
+  // $0.05 dust wallet cannot cover minimum 256 output tokens on $640/1M Opus ($0.16384) -> 429
+  assert.equal((await postChat(dust.key)).status, 429);
+  assert.equal(calls.length, 0);
+
+  // $1.00 starter wallet succeeds and upstream max_tokens is clamped to 1562 ($1.00 / $640 per 1M)
+  assert.equal((await postChat(starter.key)).status, 200);
+  assert.equal(calls[0].max_tokens, 1562);
+
+  // $50.00 wallet covers worst-case reservation -> keeps full 32768 output limit
+  assert.equal((await postChat(whale.key)).status, 200);
+  assert.equal(calls[1].max_tokens, 32_768);
+});
+
+test('pre-response upstream connection failure (502 / ECONNREFUSED) refunds 100% of reservation', async (t) => {
+  // Bind and immediately close an ephemeral server to get a guaranteed refused port
+  const probe = createServer();
+  const deadOrigin = await listen(probe);
+  await new Promise((r) => probe.close(r));
+
+  const store = createStore(':memory:');
+  const gateway = createGateway({
+    config: {
+      adminToken, routerApiKey, routerOrigin: deadOrigin, upstreamTimeoutMs: 5_000, maxBodyBytes: 65_536,
+      models: new Map([[model, { id: model, inputMicrosPerMillion: 2_000_000, outputMicrosPerMillion: 3_000_000, maxInputTokens: 1000, maxOutputTokens: 1000 }]]),
+    },
+    store,
+  });
+  const origin = await listen(gateway);
+  t.after(async () => {
+    await new Promise((r) => gateway.close(r));
+    await gateway.waitForRequests();
+    store.close();
+  });
+
+  const created = store.createKey({ name: 'RefundKey', quotaMicros: 1_000_000, models: null });
+  const res = await fetch(`${origin}${chat}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${created.key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }] }),
+  });
+  assert.equal(res.status, 502);
+
+  const after = store.getKey(created.id);
+  assert.equal(after.usedMicros, 0);
+  assert.equal(after.reservedMicros, 0);
+  assert.equal(after.remainingMicros, 1_000_000);
+  const { items: [reqLog] } = store.listRequests(created.id);
+  assert.equal(reqLog.status, 'upstream_error');
+  assert.equal(reqLog.estimated, false);
+  assert.equal(reqLog.chargedMicros, 0);
+});
+
+test('gateway configures 10+ minute requestTimeout, serves CORS preflight for /v1/* only, and rejects non-JSON (415)', async (t) => {
+  const store = createStore(':memory:');
+  const gateway = createGateway({
+    config: {
+      adminToken, routerApiKey, routerOrigin: 'http://127.0.0.1:1', upstreamTimeoutMs: 600_000, maxBodyBytes: 65_536,
+      models: new Map([[model, { id: model, inputMicrosPerMillion: 2_000_000, outputMicrosPerMillion: 3_000_000, maxInputTokens: 10, maxOutputTokens: 10 }]]),
+    },
+    store,
+  });
+  assert.ok(gateway.requestTimeout >= 660_000);
+  const origin = await listen(gateway);
+  t.after(async () => {
+    await new Promise((r) => gateway.close(r));
+    store.close();
+  });
+
+  const optRes = await fetch(`${origin}${chat}`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://webui.example', 'Access-Control-Request-Method': 'POST' },
+  });
+  assert.equal(optRes.status, 204);
+  assert.equal(optRes.headers.get('access-control-allow-origin'), '*');
+  assert.match(optRes.headers.get('access-control-allow-methods') ?? '', /POST/);
+
+  const adminOpt = await fetch(`${origin}/admin/v1/keys`, { method: 'OPTIONS' });
+  assert.equal(adminOpt.headers.get('access-control-allow-origin'), null);
+
+  const created = store.createKey({ name: 'MimeKey', quotaMicros: 1_000, models: null });
+  const modelsRes = await fetch(`${origin}/v1/models`, { headers: { Authorization: `Bearer ${created.key}` } });
+  assert.equal(modelsRes.status, 200);
+  assert.equal(modelsRes.headers.get('access-control-allow-origin'), '*');
+
+  const badType = await fetch(`${origin}${chat}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${created.key}`, 'Content-Type': 'text/plain' },
+    body: 'not json',
+  });
+  assert.equal(badType.status, 415);
+  assert.equal((await badType.json()).error.code, 'unsupported_media_type');
+});
