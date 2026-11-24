@@ -1,0 +1,266 @@
+[
+  {
+    "id": "gemini-4-carbon",
+    "inputMicrosPerMillion": 10000000,
+    "outputMicrosPerMillion": 60000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-carbon-high",
+    "inputMicrosPerMillion": 10000000,
+    "outputMicrosPerMillion": 60000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-carbon-low",
+    "inputMicrosPerMillion": 10000000,
+    "outputMicrosPerMillion": 60000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-carbon-medium",
+    "inputMicrosPerMillion": 10000000,
+    "outputMicrosPerMillion": 60000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-carbon-xhigh",
+    "inputMicrosPerMillion": 10000000,
+    "outputMicrosPerMillion": 60000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-neon",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-neon-high",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-neon-low",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-neon-medium",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-neon-xhigh",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-hydrogen",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-hydrogen-high",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-hydrogen-low",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-hydrogen-medium",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-hydrogen-tiered-high",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-hydrogen-tiered-xhigh",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-hydrogen-xhigh",
+    "inputMicrosPerMillion": 8000000,
+    "outputMicrosPerMillion": 48000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-argon",
+    "inputMicrosPerMillion": 7200000,
+    "outputMicrosPerMillion": 46000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-argon-high",
+    "inputMicrosPerMillion": 7200000,
+    "outputMicrosPerMillion": 46000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-argon-low",
+    "inputMicrosPerMillion": 7200000,
+    "outputMicrosPerMillion": 46000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-4-argon-medium",
+    "inputMicrosPerMillion": 7200000,
+    "outputMicrosPerMillion": 46000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 65536,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-3.8-flash",
+    "inputMicrosPerMillion": 1200000,
+    "outputMicrosPerMillion": 10000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-3.8-flash-high",
+    "inputMicrosPerMillion": 1200000,
+    "outputMicrosPerMillion": 10000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-3.8-flash-low",
+    "inputMicrosPerMillion": 1200000,
+    "outputMicrosPerMillion": 10000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "gemini-3.8-flash-medium",
+    "inputMicrosPerMillion": 1200000,
+    "outputMicrosPerMillion": 10000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "claude-opus-5-5",
+    "inputMicrosPerMillion": 32000000,
+    "outputMicrosPerMillion": 160000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "claude-opus-5-5-high",
+    "inputMicrosPerMillion": 32000000,
+    "outputMicrosPerMillion": 160000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "claude-opus-5-5-low",
+    "inputMicrosPerMillion": 32000000,
+    "outputMicrosPerMillion": 160000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "claude-opus-5-5-medium",
+    "inputMicrosPerMillion": 32000000,
+    "outputMicrosPerMillion": 160000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "claude-sonnet-5-5",
+    "inputMicrosPerMillion": 18000000,
+    "outputMicrosPerMillion": 90000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "claude-sonnet-5-5-high",
+    "inputMicrosPerMillion": 18000000,
+    "outputMicrosPerMillion": 90000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "claude-sonnet-5-5-low",
+    "inputMicrosPerMillion": 18000000,
+    "outputMicrosPerMillion": 90000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  },
+  {
+    "id": "claude-sonnet-5-5-medium",
+    "inputMicrosPerMillion": 18000000,
+    "outputMicrosPerMillion": 90000000,
+    "maxInputTokens": 131072,
+    "maxOutputTokens": 32768,
+    "chatOutputLimitField": "max_tokens"
+  }
+]
