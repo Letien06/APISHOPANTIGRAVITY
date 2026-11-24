@@ -1,5 +1,6 @@
 import {
   appendRequestPage,
+  buildRequestFilterParams,
   dismissSplash,
   escapeHtml,
   formatInteger,
@@ -13,6 +14,7 @@ import {
   mergeRequestPages,
   renderNullableValue,
   translateApiError,
+  triggerBlobDownload,
 } from '/usage/assets/format.js';
 
 initSplashGuard();
@@ -74,6 +76,13 @@ const dom = {
   accountKeysPills: document.getElementById('account-keys-pills'),
   accountKeysEmpty: document.getElementById('account-keys-empty'),
   manualKeyDivider: document.getElementById('manual-key-divider'),
+  exportCsvBtn: document.getElementById('usage-export-csv-btn'),
+  filterForm: document.getElementById('usage-filter-form'),
+  fromDateInput: document.getElementById('usage-from-date'),
+  toDateInput: document.getElementById('usage-to-date'),
+  modelFilterSelect: document.getElementById('usage-model-filter'),
+  statusFilterSelect: document.getElementById('usage-status-filter'),
+  filterResetBtn: document.getElementById('usage-filter-reset'),
 };
 
 const LIVE_INTERVAL_MS = 3000;
@@ -94,6 +103,7 @@ const state = {
   loadingMore: false,
   lastHistoryCursorAttempt: null,
   publicModelIds: [],
+  filters: { fromDate: '', toDate: '', model: 'all', status: 'all' },
   liveEnabled: true,
   pollTimer: null,
   pollInFlight: false,
@@ -478,9 +488,20 @@ function renderRequestCardMobile(item) {
   `;
 }
 
+function hasActiveUsageFilter() {
+  return Boolean(
+    state.filters.fromDate
+    || state.filters.toDate
+    || (state.filters.model && state.filters.model !== 'all')
+    || (state.filters.status && state.filters.status !== 'all'),
+  );
+}
+
 function renderHistory() {
   dom.historySection.classList.remove('hidden');
-  const total = Math.max(state.items.length, state.historyTotal, Number(state.summary?.requestCount ?? 0));
+  const total = hasActiveUsageFilter()
+    ? Math.max(state.items.length, state.historyTotal)
+    : Math.max(state.items.length, state.historyTotal, Number(state.summary?.requestCount ?? 0));
   dom.historyCount.textContent = formatLoadedCount(state.items.length, total);
 
   if (state.items.length === 0) {
@@ -530,9 +551,10 @@ async function loadAccountKey(keyId) {
   setLoading(true, 'Đang tải hạn mức và lịch sử yêu cầu...');
 
   try {
+    const histQuery = buildRequestFilterParams({ limit: PAGE_LIMIT, ...state.filters });
     const [summary, history] = await Promise.all([
       fetchAccountJson(`/api/console/keys/${encodeURIComponent(keyId)}`, controller.signal),
-      fetchAccountJson(`/api/console/keys/${encodeURIComponent(keyId)}/requests?limit=${PAGE_LIMIT}`, controller.signal),
+      fetchAccountJson(`/api/console/keys/${encodeURIComponent(keyId)}/requests?${histQuery}`, controller.signal),
     ]);
     if (currentGen !== state.generation) return;
     state.summary = summary;
@@ -585,9 +607,10 @@ async function loadUsage(apiKey) {
   setLoading(true, 'Đang tải hạn mức và lịch sử yêu cầu...');
 
   try {
+    const histQuery = buildRequestFilterParams({ limit: PAGE_LIMIT, ...state.filters });
     const [summary, history] = await Promise.all([
       fetchJson('/api/usage', trimmed, controller.signal),
-      fetchJson(`/api/usage/requests?limit=${PAGE_LIMIT}`, trimmed, controller.signal),
+      fetchJson(`/api/usage/requests?${histQuery}`, trimmed, controller.signal),
     ]);
     if (currentGen !== state.generation) return;
     state.summary = summary;
@@ -624,14 +647,15 @@ async function loadMoreHistory() {
   state.controller = controller;
 
   try {
+    const histQuery = buildRequestFilterParams({ limit: PAGE_LIMIT, before: cursor, ...state.filters });
     const page =
       state.mode === 'account'
         ? await fetchAccountJson(
-            `/api/console/keys/${encodeURIComponent(state.activeKeyId)}/requests?limit=${PAGE_LIMIT}&before=${encodeURIComponent(cursor)}`,
+            `/api/console/keys/${encodeURIComponent(state.activeKeyId)}/requests?${histQuery}`,
             controller.signal,
           )
         : await fetchJson(
-            `/api/usage/requests?limit=${PAGE_LIMIT}&before=${encodeURIComponent(cursor)}`,
+            `/api/usage/requests?${histQuery}`,
             state.activeKey,
             controller.signal,
           );
@@ -756,6 +780,16 @@ async function loadPublicModelsCatalog() {
     const ids = Array.isArray(data?.items) ? data.items.map((m) => m.id).filter(Boolean) : [];
     if (ids.length === 0) return;
     state.publicModelIds = ids;
+    if (dom.modelFilterSelect) {
+      const prev = dom.modelFilterSelect.value || 'all';
+      dom.modelFilterSelect.innerHTML = [
+        '<option value="all">Tất cả model</option>',
+        ...ids.map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`),
+      ].join('');
+      if ([...dom.modelFilterSelect.options].some((o) => o.value === prev)) {
+        dom.modelFilterSelect.value = prev;
+      }
+    }
     if (dom.availableModelsSection && dom.availableModelsChips && dom.availableModelsCount) {
       dom.availableModelsCount.textContent = `${ids.length} model`;
       dom.availableModelsChips.innerHTML = ids
@@ -841,15 +875,16 @@ async function silentPollUsage() {
   const keyId = state.activeKeyId;
   state.pollInFlight = true;
   try {
+    const histQuery = buildRequestFilterParams({ limit: PAGE_LIMIT, ...state.filters });
     const [summary, history] =
       mode === 'account'
         ? await Promise.all([
             fetchAccountJson(`/api/console/keys/${encodeURIComponent(keyId)}`),
-            fetchAccountJson(`/api/console/keys/${encodeURIComponent(keyId)}/requests?limit=${PAGE_LIMIT}`),
+            fetchAccountJson(`/api/console/keys/${encodeURIComponent(keyId)}/requests?${histQuery}`),
           ])
         : await Promise.all([
             fetchJson('/api/usage', apiKey),
-            fetchJson(`/api/usage/requests?limit=${PAGE_LIMIT}`, apiKey),
+            fetchJson(`/api/usage/requests?${histQuery}`, apiKey),
           ]);
     if (currentGen !== state.generation) return;
     if (mode === 'account' && (state.mode !== 'account' || state.activeKeyId !== keyId)) return;
@@ -916,6 +951,76 @@ if (dom.liveToggleBtn) {
     state.liveEnabled = !state.liveEnabled;
     updateUsageLiveUi();
     if (state.liveEnabled) silentPollUsage();
+  });
+}
+
+function reloadFilteredUsage() {
+  if (state.mode === 'account' && state.activeKeyId) {
+    loadAccountKey(state.activeKeyId);
+  } else if (state.mode === 'key' && state.activeKey) {
+    loadUsage(state.activeKey);
+  }
+}
+
+if (dom.filterForm) {
+  dom.filterForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    state.filters = {
+      fromDate: dom.fromDateInput?.value ?? '',
+      toDate: dom.toDateInput?.value ?? '',
+      model: dom.modelFilterSelect?.value ?? 'all',
+      status: dom.statusFilterSelect?.value ?? 'all',
+    };
+    reloadFilteredUsage();
+  });
+}
+
+if (dom.filterResetBtn) {
+  dom.filterResetBtn.addEventListener('click', () => {
+    if (dom.fromDateInput) dom.fromDateInput.value = '';
+    if (dom.toDateInput) dom.toDateInput.value = '';
+    if (dom.modelFilterSelect) dom.modelFilterSelect.value = 'all';
+    if (dom.statusFilterSelect) dom.statusFilterSelect.value = 'all';
+    state.filters = { fromDate: '', toDate: '', model: 'all', status: 'all' };
+    reloadFilteredUsage();
+  });
+}
+
+if (dom.exportCsvBtn) {
+  dom.exportCsvBtn.addEventListener('click', async () => {
+    if (!hasActiveTarget()) return;
+    const qs = buildRequestFilterParams(state.filters);
+    if (state.mode === 'account' && state.activeKeyId) {
+      window.location.href = `/api/console/keys/${encodeURIComponent(state.activeKeyId)}/requests.csv${qs ? `?${qs}` : ''}`;
+      return;
+    }
+    if (state.mode === 'key' && state.activeKey) {
+      dom.exportCsvBtn.disabled = true;
+      try {
+        const res = await fetch(`/api/usage/requests.csv${qs ? `?${qs}` : ''}`, {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'omit',
+          headers: { Authorization: `Bearer ${state.activeKey}` },
+        });
+        if (!res.ok) {
+          let payload = null;
+          try {
+            payload = await res.json();
+          } catch {
+            payload = null;
+          }
+          throw translateApiError(payload, res.status);
+        }
+        const blob = await res.blob();
+        const prefix = state.summary?.keyPrefix || 'key';
+        triggerBlobDownload(blob, `tiencoder-${prefix}-requests.csv`);
+      } catch (error) {
+        showHistoryError(error.message ?? 'Không thể xuất file CSV.');
+      } finally {
+        dom.exportCsvBtn.disabled = false;
+      }
+    }
   });
 }
 

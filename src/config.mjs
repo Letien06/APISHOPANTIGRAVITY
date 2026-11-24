@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 function integer(value, name, min, max) {
   const parsed = Number(value);
@@ -92,6 +93,11 @@ export function loadConfig(env = process.env) {
     ? env.ADMIN_PASSWORD
     : null;
 
+  const databasePath = env.DB_PATH ?? './data/gateway.sqlite';
+  const backupDir = typeof env.BACKUP_DIR === 'string' && env.BACKUP_DIR.trim()
+    ? env.BACKUP_DIR.trim()
+    : (databasePath === ':memory:' ? null : join(dirname(databasePath), 'backups'));
+
   return {
     host: env.HOST ?? '127.0.0.1',
     port: integer(env.PORT ?? '20129', 'PORT', 1, 65535),
@@ -100,7 +106,10 @@ export function loadConfig(env = process.env) {
     adminPassword,
     routerApiKey,
     routerOrigin: upstreamOrigin(env.ROUTER_BASE_URL ?? 'http://127.0.0.1:20128'),
-    databasePath: env.DB_PATH ?? './data/gateway.sqlite',
+    databasePath,
+    backupDir,
+    backupIntervalHours: integer(env.BACKUP_INTERVAL_HOURS ?? '24', 'BACKUP_INTERVAL_HOURS', 0, 720),
+    backupRetentionCount: integer(env.BACKUP_RETENTION_COUNT ?? '14', 'BACKUP_RETENTION_COUNT', 1, 90),
     models: readModels(env.MODELS_FILE ?? './models.json'),
     upstreamTimeoutMs: integer(env.UPSTREAM_TIMEOUT_MS ?? '600000', 'UPSTREAM_TIMEOUT_MS', 1000, 600_000),
     maxBodyBytes: integer(env.MAX_BODY_BYTES ?? '16777216', 'MAX_BODY_BYTES', 1024, 52_428_800),

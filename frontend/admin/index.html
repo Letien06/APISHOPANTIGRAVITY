@@ -6,7 +6,7 @@
     <meta name="referrer" content="no-referrer" />
     <title>Quản trị TienCoder API</title>
     <link rel="icon" type="image/svg+xml" href="/admin/assets/favicon.svg?v=2" />
-    <link rel="stylesheet" href="/admin/assets/admin.css?v=5" />
+    <link rel="stylesheet" href="/admin/assets/admin.css?v=6" />
   </head>
   <body>
     <div id="tc-splash" class="tc-splash" role="status" aria-live="polite" aria-label="Đang tải Quản trị TienCoder API">
@@ -154,6 +154,13 @@
               <span>Tài khoản</span>
               <span class="tab-count" id="nav-count-users">0</span>
             </button>
+            <button type="button" class="admin-nav-tab" data-page="analytics" role="tab" aria-selected="false">
+              <span>Thống kê &amp; Sao lưu</span>
+            </button>
+            <button type="button" class="admin-nav-tab" data-page="giftcodes" role="tab" aria-selected="false">
+              <span>Giftcode &amp; Sổ cái</span>
+              <span class="tab-count" id="nav-count-giftcodes">0</span>
+            </button>
             <button type="button" class="admin-nav-tab" data-page="models" role="tab" aria-selected="false">
               <span>Models</span>
               <span class="tab-count" id="nav-count-models">0</span>
@@ -270,8 +277,43 @@
               <h3>Lịch sử yêu cầu của khóa</h3>
               <span class="sub-line">Mới nhất trước · Thời gian hiển thị theo Giờ Việt Nam (UTC+7)</span>
             </div>
-            <span id="detail-history-count" class="badge badge-neutral">0 mục</span>
+            <div class="toolbar-actions">
+              <button id="detail-export-csv-btn" type="button" class="btn btn-secondary btn-sm">Xuất CSV</button>
+              <span id="detail-history-count" class="badge badge-neutral">0 mục</span>
+            </div>
           </div>
+
+          <form id="detail-filter-form" class="history-filter-bar" autocomplete="off">
+            <div class="filter-field">
+              <label for="detail-from-date">Từ ngày (UTC+7)</label>
+              <input id="detail-from-date" class="text-input" type="date" />
+            </div>
+            <div class="filter-field">
+              <label for="detail-to-date">Đến ngày (UTC+7)</label>
+              <input id="detail-to-date" class="text-input" type="date" />
+            </div>
+            <div class="filter-field">
+              <label for="detail-model-filter">Model</label>
+              <select id="detail-model-filter" class="select-input">
+                <option value="all">Tất cả model</option>
+              </select>
+            </div>
+            <div class="filter-field">
+              <label for="detail-status-filter">Trạng thái</label>
+              <select id="detail-status-filter" class="select-input">
+                <option value="all">Tất cả trạng thái</option>
+                <option value="success">Thành công</option>
+                <option value="upstream_error">Lỗi upstream</option>
+                <option value="transport_error">Lỗi kết nối</option>
+                <option value="usage_missing">Thiếu usage</option>
+                <option value="pending">Đang xử lý</option>
+              </select>
+            </div>
+            <div class="filter-actions">
+              <button type="submit" class="btn btn-primary btn-sm">Lọc</button>
+              <button id="detail-filter-reset" type="button" class="btn btn-secondary btn-sm">Xóa lọc</button>
+            </div>
+          </form>
 
           <div id="detail-history-error" class="alert alert-danger hidden" role="alert"></div>
           <div id="detail-history-empty" class="empty-state hidden">
@@ -309,13 +351,46 @@
               <span class="sub-line">Quan sát mọi request từ tất cả khóa &amp; tài khoản theo thời gian thực · Giờ Việt Nam (UTC+7)</span>
             </div>
             <div class="toolbar-actions">
+              <button id="live-export-csv-btn" type="button" class="btn btn-secondary btn-sm">Xuất CSV</button>
               <span id="live-requests-count" class="badge badge-neutral">0 mục</span>
             </div>
           </div>
 
-          <div class="filter-bar">
-            <input id="live-search" class="text-input" type="search" placeholder="Lọc theo tên khóa, @username, model hoặc endpoint..." autocomplete="off" />
-          </div>
+          <form id="live-filter-form" class="history-filter-bar" autocomplete="off">
+            <div class="filter-field">
+              <label for="live-search">Tìm kiếm</label>
+              <input id="live-search" class="text-input" type="search" placeholder="Tên khóa, @user, model..." autocomplete="off" />
+            </div>
+            <div class="filter-field">
+              <label for="live-from-date">Từ ngày (UTC+7)</label>
+              <input id="live-from-date" class="text-input" type="date" />
+            </div>
+            <div class="filter-field">
+              <label for="live-to-date">Đến ngày (UTC+7)</label>
+              <input id="live-to-date" class="text-input" type="date" />
+            </div>
+            <div class="filter-field">
+              <label for="live-model-filter">Model</label>
+              <select id="live-model-filter" class="select-input">
+                <option value="all">Tất cả model</option>
+              </select>
+            </div>
+            <div class="filter-field">
+              <label for="live-status-filter">Trạng thái</label>
+              <select id="live-status-filter" class="select-input">
+                <option value="all">Tất cả trạng thái</option>
+                <option value="success">Thành công</option>
+                <option value="upstream_error">Lỗi upstream</option>
+                <option value="transport_error">Lỗi kết nối</option>
+                <option value="usage_missing">Thiếu usage</option>
+                <option value="pending">Đang xử lý</option>
+              </select>
+            </div>
+            <div class="filter-actions">
+              <button type="submit" class="btn btn-primary btn-sm">Lọc</button>
+              <button id="live-filter-reset" type="button" class="btn btn-secondary btn-sm">Xóa lọc</button>
+            </div>
+          </form>
 
           <div id="live-requests-error" class="alert alert-danger hidden" role="alert"></div>
           <div id="live-requests-empty" class="empty-state hidden">
@@ -382,7 +457,172 @@
         </section>
         </div>
 
-        <!-- PAGE 4: MODELS -->
+        <!-- PAGE 4: ANALYTICS & SQLITE BACKUPS -->
+        <div class="admin-page hidden" data-page-view="analytics">
+        <section class="card section" aria-labelledby="analytics-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="analytics-heading">Thống kê chi tiêu &amp; Tiết kiệm Prompt Cache toàn hệ thống</h2>
+              <span class="sub-line">Tổng hợp theo ngày (Giờ Việt Nam — UTC+7), top model và top tài khoản tiêu dùng</span>
+            </div>
+            <div class="days-pills" role="group" aria-label="Khoảng thời gian thống kê">
+              <button type="button" class="days-pill" data-admin-days="7">7 ngày</button>
+              <button type="button" class="days-pill active" data-admin-days="14">14 ngày</button>
+              <button type="button" class="days-pill" data-admin-days="30">30 ngày</button>
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Chi tiêu hôm nay</div>
+              <div class="kpi-value" id="adm-an-today">$0.00</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Chi tiêu trong kỳ</div>
+              <div class="kpi-value" id="adm-an-period">$0.00</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Khách tiết kiệm nhờ Cache</div>
+              <div class="kpi-value" id="adm-an-saved" style="color: #7c3aed">$0.00</div>
+            </div>
+            <div class="kpi-card kpi-highlight">
+              <div class="kpi-label">Tổng đã nạp vào ví (kỳ)</div>
+              <div class="kpi-value" id="adm-an-topup">$0.00</div>
+            </div>
+          </div>
+
+          <div id="adm-chart-box" class="analytics-chart-box"></div>
+
+          <div class="analytics-two-col">
+            <div>
+              <h3 style="margin: 0 0 10px; font-size: 0.98rem">Top Model theo chi tiêu</h3>
+              <div id="adm-top-models-empty" class="empty-state hidden"><p>Chưa có dữ liệu.</p></div>
+              <div id="adm-top-models-wrap" class="table-scroll hidden">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Model</th>
+                      <th scope="col">Req</th>
+                      <th scope="col">Cache tiết kiệm</th>
+                      <th scope="col">Chi tiêu</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adm-top-models-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <h3 style="margin: 0 0 10px; font-size: 0.98rem">Top Tài khoản theo chi tiêu</h3>
+              <div id="adm-top-users-empty" class="empty-state hidden"><p>Chưa có dữ liệu.</p></div>
+              <div id="adm-top-users-wrap" class="table-scroll hidden">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Tài khoản</th>
+                      <th scope="col">Req</th>
+                      <th scope="col">Còn lại</th>
+                      <th scope="col">Chi tiêu</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adm-top-users-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card section" aria-labelledby="backups-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="backups-heading">Sao lưu tự động SQLite (Hot Backup WAL)</h2>
+              <span id="backups-policy-note" class="sub-line">Tự động sao lưu định kỳ bằng SQLite VACUUM INTO — an toàn tuyệt đối không gián đoạn API</span>
+            </div>
+            <div class="toolbar-actions">
+              <button id="create-backup-btn" type="button" class="btn btn-primary btn-sm">+ Tạo bản sao lưu ngay</button>
+            </div>
+          </div>
+          <div id="backups-empty" class="empty-state hidden">
+            <p>Chưa có bản sao lưu nào. Bấm <strong>+ Tạo bản sao lưu ngay</strong> để tạo snapshot SQLite đầu tiên.</p>
+          </div>
+          <div id="backups-table-wrap" class="table-scroll hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Tên tệp sao lưu</th>
+                  <th scope="col">Dung lượng</th>
+                  <th scope="col">Thời điểm tạo (UTC+7)</th>
+                  <th scope="col">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody id="backups-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+        </div>
+
+        <!-- PAGE 5: GIFTCODES & WALLET LEDGER -->
+        <div class="admin-page hidden" data-page-view="giftcodes">
+        <section class="card section" aria-labelledby="giftcodes-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="giftcodes-heading">Quản lý mã nạp Giftcode</h2>
+              <span class="sub-line">Tạo mã nạp tiền USD để người dùng tự nhập trên trang Console và cộng trực tiếp vào ví</span>
+            </div>
+            <div class="toolbar-actions">
+              <button id="open-giftcode-btn" type="button" class="btn btn-primary btn-sm">+ Tạo mã Giftcode</button>
+            </div>
+          </div>
+          <div id="giftcodes-empty" class="empty-state hidden">
+            <p>Chưa có mã Giftcode nào. Bấm <strong>+ Tạo mã Giftcode</strong> để tạo mã đầu tiên.</p>
+          </div>
+          <div id="giftcodes-table-wrap" class="table-scroll hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Mã nạp</th>
+                  <th scope="col">Giá trị</th>
+                  <th scope="col">Trạng thái</th>
+                  <th scope="col">Lượt dùng</th>
+                  <th scope="col">Hạn dùng (UTC+7)</th>
+                  <th scope="col">Ghi chú</th>
+                  <th scope="col">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody id="giftcodes-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card section" aria-labelledby="ledger-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="ledger-heading">Sổ cái lịch sử nạp ví toàn hệ thống</h2>
+              <span class="sub-line">Ghi nhận mọi lần cộng/trừ hạn mức ví (Quà khởi tạo, Mã Giftcode, Admin nạp thủ công)</span>
+            </div>
+            <span id="ledger-count" class="badge badge-neutral">0 giao dịch</span>
+          </div>
+          <div id="ledger-empty" class="empty-state hidden">
+            <p>Chưa có giao dịch nạp ví nào.</p>
+          </div>
+          <div id="ledger-table-wrap" class="table-scroll hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Thời điểm (UTC+7)</th>
+                  <th scope="col">Tài khoản</th>
+                  <th scope="col">Loại</th>
+                  <th scope="col">Biến động</th>
+                  <th scope="col">Hạn mức sau</th>
+                  <th scope="col">Ghi chú / Mã</th>
+                </tr>
+              </thead>
+              <tbody id="ledger-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+        </div>
+
+        <!-- PAGE 6: MODELS -->
         <div class="admin-page hidden" data-page-view="models">
         <section class="card section" aria-labelledby="models-heading">
           <div class="toolbar">
@@ -549,10 +789,25 @@
             <p class="field-hint" id="user-quota-hint"></p>
           </div>
           <div class="field">
+            <label class="field-label" for="user-note-input">Ghi chú giao dịch nạp / điều chỉnh (lưu vào Sổ cái)</label>
+            <input id="user-note-input" class="text-input" type="text" maxlength="200" placeholder="Ví dụ: Nạp VietQR 200k, tặng bonus..." />
+          </div>
+          <div class="field">
             <label class="checkbox-row">
               <input id="user-enabled-input" type="checkbox" checked />
               <span>Cho phép tài khoản đăng nhập và sử dụng khóa</span>
             </label>
+          </div>
+          <div class="modal-divider">
+            <div class="field" style="margin-bottom: 8px">
+              <label class="field-label" for="user-reset-pw-input">Đặt lại mật khẩu mới cho người dùng (khi quên mật khẩu)</label>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap">
+                <input id="user-reset-pw-input" class="text-input mono-input" type="text" maxlength="128" placeholder="Để trống nếu không đổi mật khẩu (tối thiểu 8 ký tự)" style="flex: 1 1 200px" />
+                <button id="user-gen-pw-btn" type="button" class="btn btn-secondary btn-sm">Tự sinh</button>
+                <button id="user-reset-pw-btn" type="button" class="btn btn-danger-outline btn-sm">Đặt lại MK</button>
+              </div>
+              <p class="field-hint">Đặt lại mật khẩu sẽ đăng xuất ngay mọi phiên đăng nhập cũ của tài khoản này.</p>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -562,6 +817,56 @@
       </form>
     </dialog>
 
-    <script type="module" src="/admin/assets/admin.js?v=5"></script>
+    <!-- Create Giftcode Modal -->
+    <dialog id="giftcode-modal" class="modal" aria-labelledby="giftcode-modal-title">
+      <form id="giftcode-modal-form" novalidate>
+        <div class="modal-header">
+          <h3 id="giftcode-modal-title">Tạo mã nạp Giftcode mới</h3>
+          <button type="button" class="btn btn-secondary btn-sm" id="giftcode-modal-close-x">Đóng</button>
+        </div>
+        <div class="modal-body">
+          <div id="giftcode-modal-error" class="alert alert-danger hidden" role="alert"></div>
+          <div class="field">
+            <label class="field-label" for="gc-code-input">Mã Giftcode (để trống để tự sinh ngẫu nhiên)</label>
+            <input id="gc-code-input" class="text-input mono-input" type="text" maxlength="40" placeholder="Ví dụ: TC-TET2026 hoặc bỏ trống" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="gc-amount-input">Giá trị cộng vào ví (USD)</label>
+            <input id="gc-amount-input" class="text-input mono-input" type="text" inputmode="decimal" value="5" required />
+            <div class="row-actions" style="margin-top: 8px">
+              <button type="button" class="btn btn-secondary btn-sm" data-gc-usd="1">$1</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-gc-usd="5">$5</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-gc-usd="10">$10</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-gc-usd="20">$20</button>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="gc-max-uses-input">Số lượt dùng tối đa (mỗi tài khoản chỉ dùng 1 lần)</label>
+            <input id="gc-max-uses-input" class="text-input mono-input" type="number" min="1" max="100000" value="1" required />
+          </div>
+          <fieldset class="fieldset-clean">
+            <legend>Hạn dùng — Giờ Việt Nam (UTC+7)</legend>
+            <label class="checkbox-row">
+              <input id="gc-no-expiry" type="checkbox" checked />
+              <span>Không đặt hạn dùng</span>
+            </label>
+            <div id="gc-expiry-wrap" class="field hidden" style="margin-top: 8px; margin-bottom: 0">
+              <label class="field-label" for="gc-expiry-input">Hết hạn lúc (UTC+7)</label>
+              <input id="gc-expiry-input" class="text-input" type="datetime-local" />
+            </div>
+          </fieldset>
+          <div class="field">
+            <label class="field-label" for="gc-note-input">Ghi chú (hiển thị trong Sổ cái)</label>
+            <input id="gc-note-input" class="text-input" type="text" maxlength="200" placeholder="Ví dụ: Mã tặng khách VIP tháng 11" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="giftcode-modal-cancel">Hủy</button>
+          <button type="submit" class="btn btn-primary" id="giftcode-modal-submit">Tạo mã nạp</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="/admin/assets/admin.js?v=6"></script>
   </body>
 </html>

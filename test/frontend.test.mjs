@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { createGateway } from '../src/server.mjs';
 import { createStore } from '../src/store.mjs';
 import {
   appendRequestPage,
+  buildRequestFilterParams,
+  formatBytes,
   formatLoadedCount,
   formatMicrosInputValue,
   formatMicrosToUsd,
@@ -12,7 +17,9 @@ import {
   isoUtcToVnInput,
   mergeRequestPages,
   parseUsdToMicros,
+  renderDailySpendChartSvg,
   translateApiError,
+  vnDateRangeToUtc,
   vnInputToIsoUtc,
 } from '../frontend/shared/format.js';
 import { createMockGateway, MOCK_CREDENTIALS } from '../frontend/mock-gateway.mjs';
@@ -808,5 +815,273 @@ test('CSRF origin protection, active-key slot reuse after disable, invite code e
     await closeServer(adminServer);
     await closeServer(gateway);
     store.close();
+  }
+});
+
+test('Password change, admin reset password, giftcodes, wallet ledger, analytics, CSV export, and SQLite hot backup', async () => {
+  const adminToken = 'test_admin_token_32_characters_minimum_0003';
+  const backupDir = mkdtempSync(join(tmpdir(), 'tc-backup-test-'));
+  const store = createStore(':memory:', { encryptionSecret: adminToken });
+  const modelsMap = new Map([
+    [
+      'gemini-3.8-flash',
+      {
+        id: 'gemini-3.8-flash',
+        inputMicrosPerMillion: 1_200_000,
+        cachedInputMicrosPerMillion: 300_000,
+        outputMicrosPerMillion: 10_000_000,
+        maxInputTokens: 131_072,
+        maxOutputTokens: 32_768,
+        chatOutputLimitField: 'max_tokens',
+      },
+    ],
+    [
+      'claude-opus-5-5',
+      {
+        id: 'claude-opus-5-5',
+        inputMicrosPerMillion: 128_000_000,
+        cachedInputMicrosPerMillion: 32_000_000,
+        outputMicrosPerMillion: 640_000_000,
+        maxInputTokens: 131_072,
+        maxOutputTokens: 32_768,
+        chatOutputLimitField: 'max_tokens',
+      },
+    ],
+  ]);
+
+  const gateway = createGateway({
+    config: {
+      adminToken,
+      adminUsername: 'admin',
+      adminPassword: 'TestAdminPass@2026',
+      routerApiKey: 'test_router_key',
+      routerOrigin: 'http://127.0.0.1:1',
+      models: modelsMap,
+      upstreamTimeoutMs: 5_000,
+      maxBodyBytes: 1_048_576,
+      defaultUserQuotaMicros: 1_000_000,
+      maxKeysPerUser: 5,
+      sessionTtlMs: 3_600_000,
+      inviteCode: null,
+      backupDir,
+      backupRetentionCount: 2,
+      backupIntervalHours: 24,
+    },
+    store,
+  });
+
+  const gwOrigin = await listenEphemeral(gateway);
+  const publicServer = createPublicFrontendServer({ gatewayOrigin: gwOrigin });
+  const adminServer = createAdminFrontendServer({ gatewayOrigin: gwOrigin });
+  const publicOrigin = await listenEphemeral(publicServer);
+  const adminOrigin = await listenEphemeral(adminServer);
+  const adminHeaders = { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' };
+
+  try {
+    // 1. Register user + verify signup_bonus in wallet ledger + open 2 sessions
+    const reg = await fetch(`${publicOrigin}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: publicOrigin },
+      body: JSON.stringify({ username: 'lan_pro', email: 'lan@example.com', password: 'InitialPassword1!' }),
+    });
+    assert.equal(reg.status, 201);
+    const sessA = (reg.headers.get('set-cookie') ?? '').split(';')[0];
+    const regUser = (await reg.json()).user;
+
+    const login2 = await fetch(`${publicOrigin}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: publicOrigin },
+      body: JSON.stringify({ identifier: 'lan_pro', password: 'InitialPassword1!' }),
+    });
+    assert.equal(login2.status, 200);
+    const sessB = (login2.headers.get('set-cookie') ?? '').split(';')[0];
+
+    // Wrong current password rejected
+    const badPw = await fetch(`${publicOrigin}/api/auth/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: sessA, Origin: publicOrigin },
+      body: JSON.stringify({ currentPassword: 'WrongPassword!', newPassword: 'NewPassword2!' }),
+    });
+    assert.equal(badPw.status, 400);
+    assert.equal((await badPw.json()).error.code, 'invalid_current_password');
+
+    // Valid password change keeps sessA, revokes sessB
+    const okPw = await fetch(`${publicOrigin}/api/auth/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: sessA, Origin: publicOrigin },
+      body: JSON.stringify({ currentPassword: 'InitialPassword1!', newPassword: 'NewPassword2!' }),
+    });
+    assert.equal(okPw.status, 200);
+    assert.equal((await fetch(`${publicOrigin}/api/auth/me`, { headers: { Cookie: sessA } })).status, 200);
+    assert.equal((await fetch(`${publicOrigin}/api/auth/me`, { headers: { Cookie: sessB } })).status, 401);
+
+    // Admin resets password -> revokes sessA too, new password works
+    const resetRes = await fetch(`${adminOrigin}/admin/v1/users/${regUser.id}/reset-password`, {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({ newPassword: 'AdminResetPass3!' }),
+    });
+    assert.equal(resetRes.status, 200);
+    assert.equal((await fetch(`${publicOrigin}/api/auth/me`, { headers: { Cookie: sessA } })).status, 401);
+
+    const relogin = await fetch(`${publicOrigin}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: publicOrigin },
+      body: JSON.stringify({ identifier: 'lan_pro', password: 'AdminResetPass3!' }),
+    });
+    assert.equal(relogin.status, 200);
+    const cookie = (relogin.headers.get('set-cookie') ?? '').split(';')[0];
+
+    // 2. Admin adjusts wallet with note + creates multi-use Giftcode -> user redeems -> duplicate blocked
+    const adjustRes = await fetch(`${adminOrigin}/admin/v1/users/${regUser.id}`, {
+      method: 'PATCH',
+      headers: adminHeaders,
+      body: JSON.stringify({ quotaMicros: 3_000_000, note: 'VietQR 50k' }),
+    });
+    assert.equal(adjustRes.status, 200);
+
+    const gcCreate = await fetch(`${adminOrigin}/admin/v1/giftcodes`, {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({ code: 'TC-VIP5', amountMicros: 5_000_000, maxUses: 2, note: 'Tặng khách thân thiết' }),
+    });
+    assert.equal(gcCreate.status, 201);
+    const gc = await gcCreate.json();
+    assert.equal(gc.code, 'TC-VIP5');
+
+    const redeemOk = await fetch(`${publicOrigin}/api/console/redeem`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: publicOrigin },
+      body: JSON.stringify({ code: 'tc-vip5' }),
+    });
+    assert.equal(redeemOk.status, 200);
+    const redeemed = await redeemOk.json();
+    assert.equal(redeemed.user.quotaMicros, 8_000_000);
+
+    // Same user redeeming again returns 409 giftcode_already_used
+    const redeemDup = await fetch(`${publicOrigin}/api/console/redeem`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: publicOrigin },
+      body: JSON.stringify({ code: 'TC-VIP5' }),
+    });
+    assert.equal(redeemDup.status, 409);
+    assert.equal((await redeemDup.json()).error.code, 'giftcode_already_used');
+
+    // Verify wallet ledger on both User Console and Admin
+    const userTx = await (await fetch(`${publicOrigin}/api/console/transactions`, { headers: { Cookie: cookie } })).json();
+    assert.equal(userTx.total, 3);
+    assert.deepEqual(userTx.items.map((t) => [t.type, t.deltaMicros]), [
+      ['giftcode', 5_000_000],
+      ['admin_adjust', 2_000_000],
+      ['signup_bonus', 1_000_000],
+    ]);
+    const adminTx = await (await fetch(`${adminOrigin}/admin/v1/transactions`, { headers: adminHeaders })).json();
+    assert.equal(adminTx.total, 3);
+    assert.equal(adminTx.items[1].note, 'VietQR 50k');
+
+    // 3. Create key with formula-injection name (=SUM(A1)), add requests with Prompt Cache, test filtering, analytics & CSV
+    const keyRes = await fetch(`${publicOrigin}/api/console/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: publicOrigin },
+      body: JSON.stringify({ name: '=SUM(A1)', expiresAt: null, models: null }),
+    });
+    const userKey = await keyRes.json();
+
+    const j1 = store.reserve({
+      keyId: userKey.id, model: 'gemini-3.8-flash', endpoint: '/v1/chat/completions',
+      inputReservedMicros: 50_000, outputReservedMicros: 50_000, leaseExpiresAt: Date.now() + 60_000,
+    });
+    store.settle(j1.id, {
+      httpStatus: 200, status: 'success', inputTokens: 100_000, outputTokens: 1_000, cachedTokens: 80_000,
+      inputCostMicros: 48_000, outputCostMicros: 10_000, estimated: false,
+    });
+
+    const j2 = store.reserve({
+      keyId: userKey.id, model: 'claude-opus-5-5', endpoint: '/v1/responses',
+      inputReservedMicros: 100_000, outputReservedMicros: 100_000, leaseExpiresAt: Date.now() + 60_000,
+    });
+    store.settle(j2.id, {
+      httpStatus: 502, status: 'upstream_error', inputTokens: null, outputTokens: null, cachedTokens: null,
+      inputCostMicros: 0, outputCostMicros: 0, estimated: false,
+    });
+
+    // Filtered history query
+    const filtered = await (await fetch(
+      `${publicOrigin}/api/console/keys/${userKey.id}/requests?model=gemini-3.8-flash&status=success`,
+      { headers: { Cookie: cookie } },
+    )).json();
+    assert.equal(filtered.total, 1);
+    assert.equal(filtered.items[0].model, 'gemini-3.8-flash');
+
+    // Analytics on User Console & Admin (including 75% Prompt Cache savings: 80,000 * ($1.20 - $0.30)/1M = 72,000 micros!)
+    const userAn = await (await fetch(`${publicOrigin}/api/console/analytics?days=7`, { headers: { Cookie: cookie } })).json();
+    assert.equal(userAn.daily.length, 7);
+    assert.equal(userAn.summary.periodSpentMicros, 58_000);
+    assert.equal(userAn.summary.periodSavedMicros, 72_000);
+    assert.equal(userAn.topModels[0].model, 'gemini-3.8-flash');
+
+    const adminAn = await (await fetch(`${adminOrigin}/admin/v1/analytics?days=7`, { headers: adminHeaders })).json();
+    assert.equal(adminAn.summary.periodSavedMicros, 72_000);
+    assert.equal(adminAn.summary.periodTopupMicros, 8_000_000);
+    assert.equal(adminAn.topUsers[0].username, 'lan_pro');
+    assert.match(renderDailySpendChartSvg(adminAn.daily), /<svg/);
+
+    // CSV Export on Public /usage (Bearer), User Console (Cookie), and Admin (with CSV formula protection)
+    const usageCsvRes = await fetch(`${publicOrigin}/api/usage/requests.csv?status=success`, {
+      headers: { Authorization: `Bearer ${userKey.key}` },
+    });
+    assert.equal(usageCsvRes.status, 200);
+    assert.match(usageCsvRes.headers.get('content-type') ?? '', /^text\/csv/);
+    const usageCsvBytes = Buffer.from(await usageCsvRes.arrayBuffer());
+    assert.deepEqual([...usageCsvBytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
+    const usageCsv = usageCsvBytes.subarray(3).toString('utf8');
+    assert.match(usageCsv, /gemini-3\.8-flash/);
+    assert.doesNotMatch(usageCsv, /claude-opus-5-5/);
+
+    const adminCsvRes = await fetch(`${adminOrigin}/admin/v1/requests.csv`, { headers: adminHeaders });
+    assert.equal(adminCsvRes.status, 200);
+    const adminCsv = await adminCsvRes.text();
+    assert.match(adminCsv, /'=SUM\(A1\)/); // CSV formula injection neutralized!
+    assert.match(adminCsv, /'@lan_pro/);
+
+    // 4. SQLite Hot Backup (create, list, download valid SQLite file, retention=2 rotation, path traversal blocked, delete)
+    const b1 = await (await fetch(`${adminOrigin}/admin/v1/backups`, { method: 'POST', headers: adminHeaders })).json();
+    assert.match(b1.filename, /^gateway-backup-.*\.sqlite$/);
+    assert.ok(b1.sizeBytes > 0);
+
+    const dlRes = await fetch(`${adminOrigin}/admin/v1/backups/${encodeURIComponent(b1.filename)}`, { headers: adminHeaders });
+    assert.equal(dlRes.status, 200);
+    const dlBuf = Buffer.from(await dlRes.arrayBuffer());
+    assert.equal(dlBuf.subarray(0, 16).toString('utf8'), 'SQLite format 3\0');
+
+    // Path traversal rejected with 404
+    assert.equal((await fetch(`${adminOrigin}/admin/v1/backups/..%2F..%2Fetc%2Fpasswd`, { headers: adminHeaders })).status, 404);
+
+    // Retention count = 2 rotates oldest automatically when creating 2 more backups
+    await fetch(`${adminOrigin}/admin/v1/backups`, { method: 'POST', headers: adminHeaders });
+    await fetch(`${adminOrigin}/admin/v1/backups`, { method: 'POST', headers: adminHeaders });
+    const listAfter = await (await fetch(`${adminOrigin}/admin/v1/backups`, { headers: adminHeaders })).json();
+    assert.equal(listAfter.items.length, 2);
+
+    // Manual delete works
+    const delBk = await fetch(`${adminOrigin}/admin/v1/backups/${encodeURIComponent(listAfter.items[0].filename)}`, {
+      method: 'DELETE',
+      headers: adminHeaders,
+    });
+    assert.equal(delBk.status, 204);
+
+    // Format helpers sanity
+    assert.equal(formatBytes(2048), '2.0 KB');
+    assert.deepEqual(vnDateRangeToUtc('2026-11-24', '2026-11-24'), {
+      from: '2026-11-23T17:00:00.000Z',
+      to: '2026-11-24T16:59:59.999Z',
+    });
+    assert.match(buildRequestFilterParams({ fromDate: '2026-11-24', model: 'gemini-3.8-flash', status: 'success' }), /model=gemini-3\.8-flash/);
+  } finally {
+    await closeServer(publicServer);
+    await closeServer(adminServer);
+    await closeServer(gateway);
+    store.close();
+    rmSync(backupDir, { recursive: true, force: true });
   }
 });

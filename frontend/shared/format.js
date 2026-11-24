@@ -39,6 +39,14 @@ export const ERROR_MESSAGES = {
   user_quota_exceeded: 'Hạn mức khóa vượt quá số dư chưa phân bổ của tài khoản.',
   max_keys_reached: 'Bạn đã đạt giới hạn số lượng khóa hoạt động tối đa. Hãy tắt bớt khóa cũ trước khi tạo hoặc bật khóa mới.',
   csrf_rejected: 'Yêu cầu bị từ chối do nguồn gốc không hợp lệ (bảo vệ CSRF). Hãy tải lại trang và thử lại.',
+  invalid_current_password: 'Mật khẩu hiện tại không đúng. Vui lòng kiểm tra lại.',
+  giftcode_exists: 'Mã nạp Giftcode này đã tồn tại.',
+  giftcode_not_found: 'Mã nạp không tồn tại. Vui lòng kiểm tra lại chính tả.',
+  giftcode_disabled: 'Mã nạp này đã bị quản trị viên vô hiệu hóa.',
+  giftcode_expired: 'Mã nạp này đã hết hạn sử dụng.',
+  giftcode_exhausted: 'Mã nạp này đã hết lượt sử dụng.',
+  giftcode_already_used: 'Tài khoản của bạn đã sử dụng mã nạp này trước đó.',
+  backup_unconfigured: 'Máy chủ chưa cấu hình thư mục sao lưu SQLite.',
   username_taken: 'Tên đăng nhập này đã có người sử dụng. Hãy chọn tên khác.',
   email_taken: 'Email này đã được đăng ký tài khoản.',
   invalid_credentials: 'Tên đăng nhập/email hoặc mật khẩu không đúng.',
@@ -295,6 +303,140 @@ export function formatLoadedCount(loaded, total) {
     return `Đang hiện ${formatInteger(safeLoaded)} / ${formatInteger(safeTotal)} mục`;
   }
   return `${formatInteger(safeTotal)} mục`;
+}
+
+export function vnDateRangeToUtc(fromDate, toDate) {
+  const result = { from: null, to: null };
+  if (typeof fromDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fromDate.trim())) {
+    const [y, m, d] = fromDate.trim().split('-').map(Number);
+    result.from = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) - VN_OFFSET_MS).toISOString();
+  }
+  if (typeof toDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(toDate.trim())) {
+    const [y, m, d] = toDate.trim().split('-').map(Number);
+    result.to = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999) - VN_OFFSET_MS).toISOString();
+  }
+  return result;
+}
+
+export function buildRequestFilterParams({ limit, before, fromDate, toDate, model, status, q } = {}) {
+  const params = new URLSearchParams();
+  if (limit !== undefined && limit !== null) params.set('limit', String(limit));
+  if (before !== undefined && before !== null) params.set('before', String(before));
+  const { from, to } = vnDateRangeToUtc(fromDate, toDate);
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (model && model !== 'all') params.set('model', model);
+  if (status && status !== 'all') params.set('status', status);
+  if (q && q.trim()) params.set('q', q.trim());
+  return params.toString();
+}
+
+export function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+export function getTransactionTypeMeta(type) {
+  switch (type) {
+    case 'signup_bonus':
+      return { label: 'Quà khởi tạo', tone: 'info' };
+    case 'giftcode':
+      return { label: 'Mã nạp Giftcode', tone: 'success' };
+    case 'admin_adjust':
+      return { label: 'Admin điều chỉnh', tone: 'neutral' };
+    default:
+      return { label: type ?? 'Giao dịch', tone: 'neutral' };
+  }
+}
+
+export function getGiftcodeStatusMeta(status) {
+  switch (status) {
+    case 'active':
+      return { label: 'Đang mở', tone: 'success' };
+    case 'exhausted':
+      return { label: 'Hết lượt', tone: 'warning' };
+    case 'expired':
+      return { label: 'Hết hạn', tone: 'warning' };
+    case 'disabled':
+      return { label: 'Đã tắt', tone: 'danger' };
+    default:
+      return { label: status ?? 'Không rõ', tone: 'neutral' };
+  }
+}
+
+export function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+export function renderDailySpendChartSvg(daily) {
+  const rows = Array.isArray(daily) ? daily : [];
+  if (rows.length === 0) {
+    return '<div class="empty-state"><p>Chưa có dữ liệu biểu đồ trong giai đoạn này.</p></div>';
+  }
+  const width = 680;
+  const height = 200;
+  const padL = 56;
+  const padR = 14;
+  const padT = 18;
+  const padB = 34;
+  const plotW = width - padL - padR;
+  const plotH = height - padT - padB;
+  const maxVal = Math.max(1, ...rows.map((r) => Math.max(Number(r.spentMicros ?? 0), Number(r.savedMicros ?? 0))));
+  const slotW = plotW / rows.length;
+  const barW = Math.max(4, Math.min(24, slotW * 0.56));
+  const labelEvery = rows.length > 20 ? 4 : rows.length > 10 ? 2 : 1;
+
+  const gridLines = [0, 0.5, 1].map((ratio) => {
+    const y = padT + plotH * (1 - ratio);
+    const val = Math.round(maxVal * ratio);
+    const lbl = ratio === 0 ? '$0' : (formatMicrosToUsd(val) ?? '$0');
+    return `
+      <line x1="${padL}" y1="${y.toFixed(1)}" x2="${width - padR}" y2="${y.toFixed(1)}" stroke="#e2e8f0" stroke-dasharray="3 3" />
+      <text x="${padL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="10" fill="#64748b" font-family="ui-monospace, monospace">${escapeHtml(lbl)}</text>
+    `;
+  }).join('');
+
+  const bars = rows.map((row, idx) => {
+    const cx = padL + idx * slotW + slotW / 2;
+    const spent = Number(row.spentMicros ?? 0);
+    const saved = Number(row.savedMicros ?? 0);
+    const spentH = spent > 0 ? Math.max(3, (spent / maxVal) * plotH) : 0;
+    const savedH = saved > 0 ? Math.max(2, (saved / maxVal) * plotH) : 0;
+    const spentY = padT + plotH - spentH;
+    const savedY = padT + plotH - savedH;
+    const shortDate = String(row.date ?? '').slice(5).split('-').reverse().join('/');
+    const tip = `${row.date}: Chi ${formatMicrosToUsd(spent) ?? '$0.00'} · Tiết kiệm Cache ${formatMicrosToUsd(saved) ?? '$0.00'} · ${formatInteger(row.requests ?? 0)} request`;
+    const showLabel = idx % labelEvery === 0 || idx === rows.length - 1;
+    return `
+      <g>
+        <title>${escapeHtml(tip)}</title>
+        <rect x="${(cx - barW / 2).toFixed(1)}" y="${spentY.toFixed(1)}" width="${barW.toFixed(1)}" height="${spentH.toFixed(1)}" rx="3" fill="#059669" />
+        ${savedH > 0 ? `<rect x="${(cx + barW / 2 - Math.min(5, barW * 0.35)).toFixed(1)}" y="${savedY.toFixed(1)}" width="${Math.min(5, barW * 0.35).toFixed(1)}" height="${savedH.toFixed(1)}" rx="2" fill="#8b5cf6" opacity="0.9" />` : ''}
+        ${showLabel ? `<text x="${cx.toFixed(1)}" y="${height - 10}" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace, monospace">${escapeHtml(shortDate)}</text>` : ''}
+      </g>
+    `;
+  }).join('');
+
+  return `
+    <svg class="analytics-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Biểu đồ chi tiêu và tiết kiệm Cache theo ngày (UTC+7)">
+      ${gridLines}
+      ${bars}
+    </svg>
+    <div class="chart-legend">
+      <span><i style="background:#059669"></i> Chi tiêu thực tế (USD)</span>
+      <span><i style="background:#8b5cf6"></i> Tiết kiệm từ Prompt Cache (-75%)</span>
+    </div>
+  `;
 }
 
 let splashDismissed = false;

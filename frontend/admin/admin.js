@@ -1,22 +1,28 @@
 import {
   appendRequestPage,
+  buildRequestFilterParams,
   dismissSplash,
   escapeHtml,
+  formatBytes,
   formatInteger,
   formatLoadedCount,
   formatMicrosInputValue,
   formatMicrosToUsd,
   formatModelsSummary,
   formatVnDateTime,
+  getGiftcodeStatusMeta,
   getKeyStatusMeta,
   getRequestStatusMeta,
+  getTransactionTypeMeta,
   initSplashGuard,
   isChargeCappedByReservation,
   isoUtcToVnInput,
   mergeRequestPages,
   parseUsdToMicros,
+  renderDailySpendChartSvg,
   renderNullableValue,
   translateApiError,
+  triggerBlobDownload,
   vnInputToIsoUtc,
 } from '/admin/assets/format.js';
 
@@ -133,6 +139,62 @@ const dom = {
   disableModalError: document.getElementById('disable-modal-error'),
   disableModalCancel: document.getElementById('disable-modal-cancel'),
   disableModalConfirm: document.getElementById('disable-modal-confirm'),
+  navCountGiftcodes: document.getElementById('nav-count-giftcodes'),
+  userNoteInput: document.getElementById('user-note-input'),
+  userResetPwInput: document.getElementById('user-reset-pw-input'),
+  userGenPwBtn: document.getElementById('user-gen-pw-btn'),
+  userResetPwBtn: document.getElementById('user-reset-pw-btn'),
+  detailExportCsvBtn: document.getElementById('detail-export-csv-btn'),
+  detailFilterForm: document.getElementById('detail-filter-form'),
+  detailFromDate: document.getElementById('detail-from-date'),
+  detailToDate: document.getElementById('detail-to-date'),
+  detailModelFilter: document.getElementById('detail-model-filter'),
+  detailStatusFilter: document.getElementById('detail-status-filter'),
+  detailFilterReset: document.getElementById('detail-filter-reset'),
+  liveExportCsvBtn: document.getElementById('live-export-csv-btn'),
+  liveFilterForm: document.getElementById('live-filter-form'),
+  liveFromDate: document.getElementById('live-from-date'),
+  liveToDate: document.getElementById('live-to-date'),
+  liveModelFilter: document.getElementById('live-model-filter'),
+  liveStatusFilter: document.getElementById('live-status-filter'),
+  liveFilterReset: document.getElementById('live-filter-reset'),
+  admAnToday: document.getElementById('adm-an-today'),
+  admAnPeriod: document.getElementById('adm-an-period'),
+  admAnSaved: document.getElementById('adm-an-saved'),
+  admAnTopup: document.getElementById('adm-an-topup'),
+  admChartBox: document.getElementById('adm-chart-box'),
+  admTopModelsEmpty: document.getElementById('adm-top-models-empty'),
+  admTopModelsWrap: document.getElementById('adm-top-models-wrap'),
+  admTopModelsTbody: document.getElementById('adm-top-models-tbody'),
+  admTopUsersEmpty: document.getElementById('adm-top-users-empty'),
+  admTopUsersWrap: document.getElementById('adm-top-users-wrap'),
+  admTopUsersTbody: document.getElementById('adm-top-users-tbody'),
+  backupsPolicyNote: document.getElementById('backups-policy-note'),
+  createBackupBtn: document.getElementById('create-backup-btn'),
+  backupsEmpty: document.getElementById('backups-empty'),
+  backupsTableWrap: document.getElementById('backups-table-wrap'),
+  backupsTbody: document.getElementById('backups-tbody'),
+  openGiftcodeBtn: document.getElementById('open-giftcode-btn'),
+  giftcodesEmpty: document.getElementById('giftcodes-empty'),
+  giftcodesTableWrap: document.getElementById('giftcodes-table-wrap'),
+  giftcodesTbody: document.getElementById('giftcodes-tbody'),
+  ledgerCount: document.getElementById('ledger-count'),
+  ledgerEmpty: document.getElementById('ledger-empty'),
+  ledgerTableWrap: document.getElementById('ledger-table-wrap'),
+  ledgerTbody: document.getElementById('ledger-tbody'),
+  giftcodeModal: document.getElementById('giftcode-modal'),
+  giftcodeModalForm: document.getElementById('giftcode-modal-form'),
+  giftcodeModalCloseX: document.getElementById('giftcode-modal-close-x'),
+  giftcodeModalCancel: document.getElementById('giftcode-modal-cancel'),
+  giftcodeModalSubmit: document.getElementById('giftcode-modal-submit'),
+  giftcodeModalError: document.getElementById('giftcode-modal-error'),
+  gcCodeInput: document.getElementById('gc-code-input'),
+  gcAmountInput: document.getElementById('gc-amount-input'),
+  gcMaxUsesInput: document.getElementById('gc-max-uses-input'),
+  gcNoExpiry: document.getElementById('gc-no-expiry'),
+  gcExpiryWrap: document.getElementById('gc-expiry-wrap'),
+  gcExpiryInput: document.getElementById('gc-expiry-input'),
+  gcNoteInput: document.getElementById('gc-note-input'),
 };
 
 // Strictly in-memory session state — never persisted to cookies or web storage.
@@ -144,6 +206,15 @@ const state = {
   models: [],
   keys: [],
   users: [],
+  giftcodes: [],
+  transactions: [],
+  transactionsTotal: 0,
+  analytics: null,
+  analyticsDays: 14,
+  backupsMeta: { enabled: false, intervalHours: 24, retentionCount: 14 },
+  backups: [],
+  detailFilters: { fromDate: '', toDate: '', model: 'all', status: 'all' },
+  liveFilters: { fromDate: '', toDate: '', model: 'all', status: 'all', q: '' },
   editingUser: null,
   selectedKey: null,
   selectedHistory: [],
@@ -254,6 +325,11 @@ function logout(reasonMessage = '', { notifyServer = false } = {}) {
   closeDialogSafe(dom.revealModal);
   closeDialogSafe(dom.disableModal);
   closeDialogSafe(dom.userModal);
+  if (dom.giftcodeModal) closeDialogSafe(dom.giftcodeModal);
+  state.giftcodes = [];
+  state.transactions = [];
+  state.backups = [];
+  state.analytics = null;
 
   dom.adminTokenInput.value = '';
   if (dom.adminPasswordInput) dom.adminPasswordInput.value = '';
@@ -321,7 +397,35 @@ async function adminFetch(path, { method = 'GET', body, signal } = {}) {
   return payload;
 }
 
-const VALID_PAGES = new Set(['keys', 'live', 'users', 'models']);
+async function adminDownloadFile(path, filename) {
+  const headers = {};
+  if (state.adminToken) {
+    headers.Authorization = `Bearer ${state.adminToken}`;
+  }
+  const response = await fetch(path, {
+    method: 'GET',
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers,
+  });
+  if (!response.ok) {
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    const translated = translateApiError(payload, response.status);
+    if (response.status === 401 && translated.code === 'admin_required' && state.authenticated) {
+      logout(translated.message);
+    }
+    throw { httpStatus: response.status, ...translated };
+  }
+  const blob = await response.blob();
+  triggerBlobDownload(blob, filename);
+}
+
+const VALID_PAGES = new Set(['keys', 'live', 'users', 'analytics', 'giftcodes', 'models']);
 
 function pageFromHash() {
   const h = (window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
@@ -359,7 +463,201 @@ function renderOverviewStats() {
   if (dom.navCountKeys) dom.navCountKeys.textContent = formatInteger(totalKeys) ?? '0';
   if (dom.navCountLive) dom.navCountLive.textContent = formatInteger(totalReqs) ?? '0';
   if (dom.navCountUsers) dom.navCountUsers.textContent = formatInteger(state.users.length) ?? '0';
+  if (dom.navCountGiftcodes) dom.navCountGiftcodes.textContent = formatInteger(state.giftcodes.length) ?? '0';
   if (dom.navCountModels) dom.navCountModels.textContent = formatInteger(state.models.length) ?? '0';
+}
+
+function populateHistoryModelSelects() {
+  for (const selectEl of [dom.detailModelFilter, dom.liveModelFilter]) {
+    if (!selectEl) continue;
+    const prev = selectEl.value || 'all';
+    selectEl.innerHTML = [
+      '<option value="all">Tất cả model</option>',
+      ...state.models.map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.id)}</option>`),
+    ].join('');
+    if ([...selectEl.options].some((o) => o.value === prev)) {
+      selectEl.value = prev;
+    }
+  }
+}
+
+function renderAdminAnalytics() {
+  const data = state.analytics;
+  if (!data || !dom.admChartBox) return;
+  const s = data.summary ?? {};
+  if (dom.admAnToday) dom.admAnToday.textContent = formatMicrosToUsd(s.todaySpentMicros ?? 0) ?? '$0.00';
+  if (dom.admAnPeriod) dom.admAnPeriod.textContent = formatMicrosToUsd(s.periodSpentMicros ?? 0) ?? '$0.00';
+  if (dom.admAnSaved) dom.admAnSaved.textContent = formatMicrosToUsd(s.periodSavedMicros ?? 0) ?? '$0.00';
+  if (dom.admAnTopup) dom.admAnTopup.textContent = formatMicrosToUsd(s.periodTopupMicros ?? 0) ?? '$0.00';
+  dom.admChartBox.innerHTML = renderDailySpendChartSvg(data.daily);
+
+  const topModels = Array.isArray(data.topModels) ? data.topModels : [];
+  if (topModels.length === 0) {
+    dom.admTopModelsEmpty?.classList.remove('hidden');
+    dom.admTopModelsWrap?.classList.add('hidden');
+    if (dom.admTopModelsTbody) dom.admTopModelsTbody.innerHTML = '';
+  } else {
+    dom.admTopModelsEmpty?.classList.add('hidden');
+    dom.admTopModelsWrap?.classList.remove('hidden');
+    if (dom.admTopModelsTbody) {
+      dom.admTopModelsTbody.innerHTML = topModels
+        .map(
+          (m) => `
+        <tr>
+          <td class="mono"><strong>${escapeHtml(m.model)}</strong></td>
+          <td class="num">${escapeHtml(formatInteger(m.requests))}</td>
+          <td class="num" style="color:#7c3aed; font-weight:700">${escapeHtml(formatMicrosToUsd(m.savedMicros) ?? '$0.00')}</td>
+          <td class="num"><strong>${escapeHtml(formatMicrosToUsd(m.spentMicros) ?? '$0.00')}</strong></td>
+        </tr>
+      `,
+        )
+        .join('');
+    }
+  }
+
+  const topUsers = Array.isArray(data.topUsers) ? data.topUsers : [];
+  if (topUsers.length === 0) {
+    dom.admTopUsersEmpty?.classList.remove('hidden');
+    dom.admTopUsersWrap?.classList.add('hidden');
+    if (dom.admTopUsersTbody) dom.admTopUsersTbody.innerHTML = '';
+  } else {
+    dom.admTopUsersEmpty?.classList.add('hidden');
+    dom.admTopUsersWrap?.classList.remove('hidden');
+    if (dom.admTopUsersTbody) {
+      dom.admTopUsersTbody.innerHTML = topUsers
+        .map(
+          (u) => `
+        <tr>
+          <td class="mono"><strong>@${escapeHtml(u.username)}</strong></td>
+          <td class="num">${escapeHtml(formatInteger(u.requests))}</td>
+          <td class="num">${escapeHtml(formatMicrosToUsd(u.remainingMicros) ?? '$0.00')}</td>
+          <td class="num"><strong>${escapeHtml(formatMicrosToUsd(u.spentMicros) ?? '$0.00')}</strong></td>
+        </tr>
+      `,
+        )
+        .join('');
+    }
+  }
+}
+
+function renderBackupsTable() {
+  if (!dom.backupsTbody) return;
+  if (dom.backupsPolicyNote) {
+    dom.backupsPolicyNote.textContent = state.backupsMeta.enabled
+      ? `Tự động sao lưu mỗi ${state.backupsMeta.intervalHours} giờ (lưu tối đa ${state.backupsMeta.retentionCount} bản gần nhất) bằng SQLite VACUUM INTO.`
+      : 'Chưa cấu hình thư mục sao lưu cố định trên máy chủ.';
+  }
+  if (state.backups.length === 0) {
+    dom.backupsEmpty?.classList.remove('hidden');
+    dom.backupsTableWrap?.classList.add('hidden');
+    dom.backupsTbody.innerHTML = '';
+    return;
+  }
+  dom.backupsEmpty?.classList.add('hidden');
+  dom.backupsTableWrap?.classList.remove('hidden');
+  dom.backupsTbody.innerHTML = state.backups
+    .map(
+      (b) => `
+    <tr>
+      <td class="mono"><strong>${escapeHtml(b.filename)}</strong></td>
+      <td class="num">${escapeHtml(formatBytes(b.sizeBytes))}</td>
+      <td class="num">${renderNullableValue(formatVnDateTime(b.createdAt))}</td>
+      <td>
+        <div class="row-actions">
+          <button type="button" class="btn btn-secondary btn-sm" data-backup-download="${escapeHtml(b.filename)}">Tải về .sqlite</button>
+          <button type="button" class="btn btn-danger-outline btn-sm" data-backup-delete="${escapeHtml(b.filename)}">Xóa</button>
+        </div>
+      </td>
+    </tr>
+  `,
+    )
+    .join('');
+}
+
+function renderGiftcodesTable() {
+  if (!dom.giftcodesTbody) return;
+  if (state.giftcodes.length === 0) {
+    dom.giftcodesEmpty?.classList.remove('hidden');
+    dom.giftcodesTableWrap?.classList.add('hidden');
+    dom.giftcodesTbody.innerHTML = '';
+    return;
+  }
+  dom.giftcodesEmpty?.classList.add('hidden');
+  dom.giftcodesTableWrap?.classList.remove('hidden');
+  dom.giftcodesTbody.innerHTML = state.giftcodes
+    .map((g) => {
+      const meta = getGiftcodeStatusMeta(g.status);
+      const expiresHtml = g.expiresAt === null
+        ? '<span>Không giới hạn</span>'
+        : renderNullableValue(formatVnDateTime(g.expiresAt));
+      return `
+      <tr>
+        <td>
+          <div class="key-prefix-row">
+            <strong class="mono">${escapeHtml(g.code)}</strong>
+            <button type="button" class="btn-copy-inline" data-copy-gc="${escapeHtml(g.code)}">Sao chép</button>
+          </div>
+        </td>
+        <td class="num"><strong style="color:#047857">${escapeHtml(formatMicrosToUsd(g.amountMicros) ?? '$0.00')}</strong></td>
+        <td><span class="badge badge-${meta.tone}">${escapeHtml(meta.label)}</span></td>
+        <td class="num">${escapeHtml(formatInteger(g.usedCount))} / ${escapeHtml(formatInteger(g.maxUses))}</td>
+        <td class="num">${expiresHtml}</td>
+        <td>${escapeHtml(g.note ?? '—')}</td>
+        <td>
+          ${
+            g.enabled
+              ? `<button type="button" class="btn btn-danger-outline btn-sm" data-gc-toggle="${escapeHtml(g.id)}" data-gc-next="false">Tắt mã</button>`
+              : `<button type="button" class="btn btn-primary btn-sm" data-gc-toggle="${escapeHtml(g.id)}" data-gc-next="true">Mở lại</button>`
+          }
+        </td>
+      </tr>
+    `;
+    })
+    .join('');
+}
+
+function renderLedgerTable() {
+  if (!dom.ledgerTbody) return;
+  const total = Math.max(state.transactions.length, state.transactionsTotal);
+  if (dom.ledgerCount) dom.ledgerCount.textContent = `${formatInteger(total) ?? '0'} giao dịch`;
+  if (state.transactions.length === 0) {
+    dom.ledgerEmpty?.classList.remove('hidden');
+    dom.ledgerTableWrap?.classList.add('hidden');
+    dom.ledgerTbody.innerHTML = '';
+    return;
+  }
+  dom.ledgerEmpty?.classList.add('hidden');
+  dom.ledgerTableWrap?.classList.remove('hidden');
+  dom.ledgerTbody.innerHTML = state.transactions
+    .map((tx) => {
+      const meta = getTransactionTypeMeta(tx.type);
+      const pos = tx.deltaMicros >= 0;
+      const sign = pos ? '+' : '';
+      return `
+      <tr>
+        <td class="num">${renderNullableValue(formatVnDateTime(tx.createdAt))}</td>
+        <td class="mono"><strong>@${escapeHtml(tx.username ?? 'unknown')}</strong></td>
+        <td><span class="badge badge-${meta.tone}">${escapeHtml(meta.label)}</span></td>
+        <td class="num"><span class="${pos ? 'tx-delta-pos' : 'tx-delta-neg'}">${escapeHtml(sign + (formatMicrosToUsd(tx.deltaMicros) ?? '$0.00'))}</span></td>
+        <td class="num"><strong>${escapeHtml(formatMicrosToUsd(tx.balanceAfterMicros) ?? '$0.00')}</strong></td>
+        <td>
+          <div>${escapeHtml(tx.note ?? '—')}</div>
+          ${tx.refCode ? `<span class="sub-line mono">Mã: ${escapeHtml(tx.refCode)}</span>` : ''}
+        </td>
+      </tr>
+    `;
+    })
+    .join('');
+}
+
+function hasActiveFilter(filters) {
+  return Boolean(
+    filters.fromDate
+    || filters.toDate
+    || (filters.model && filters.model !== 'all')
+    || (filters.status && filters.status !== 'all')
+    || (filters.q && filters.q.trim()),
+  );
 }
 
 function renderModelsTable() {
@@ -585,7 +883,9 @@ function renderSelectedDetail() {
       : renderNullableValue(formatVnDateTime(key.expiresAt));
   dom.detailModels.innerHTML = renderModelsAccessHtml(key.models);
 
-  const historyTotal = Math.max(state.selectedHistory.length, state.selectedHistoryTotal, Number(key.requestCount ?? 0));
+  const historyTotal = hasActiveFilter(state.detailFilters)
+    ? Math.max(state.selectedHistory.length, state.selectedHistoryTotal)
+    : Math.max(state.selectedHistory.length, state.selectedHistoryTotal, Number(key.requestCount ?? 0));
   dom.detailHistoryCount.textContent = formatLoadedCount(state.selectedHistory.length, historyTotal);
   if (state.selectedHistory.length === 0) {
     dom.detailHistoryEmpty.classList.remove('hidden');
@@ -610,19 +910,13 @@ function renderSelectedDetail() {
 
 function renderLiveRequests() {
   if (!dom.liveRequestsTbody) return;
-  const query = (dom.liveSearch?.value ?? '').trim().toLowerCase();
-  const filtered = query
-    ? state.liveRequests.filter((item) => {
-        const hay = `${item.keyName ?? ''} ${item.keyPrefix ?? ''} ${item.username ?? ''} ${item.model ?? ''} ${item.endpoint ?? ''} ${item.status ?? ''}`.toLowerCase();
-        return hay.includes(query);
-      })
-    : state.liveRequests;
-
+  const filtered = state.liveRequests;
+  const isFiltered = hasActiveFilter(state.liveFilters);
   const keyTotalReqs = state.keys.reduce((sum, k) => sum + Number(k.requestCount ?? 0), 0);
-  const totalReqs = Math.max(keyTotalReqs, state.liveTotal, state.liveRequests.length);
-  dom.liveRequestsCount.textContent = query
-    ? `Lọc ${formatInteger(filtered.length)} / ${formatInteger(state.liveRequests.length)} mục đã tải (tổng ${formatInteger(totalReqs)})`
-    : formatLoadedCount(state.liveRequests.length, totalReqs);
+  const totalReqs = isFiltered
+    ? Math.max(state.liveTotal, filtered.length)
+    : Math.max(keyTotalReqs, state.liveTotal, filtered.length);
+  dom.liveRequestsCount.textContent = formatLoadedCount(filtered.length, totalReqs);
   if (filtered.length === 0) {
     dom.liveRequestsEmpty.classList.remove('hidden');
     dom.liveRequestsTableWrap.classList.add('hidden');
@@ -724,18 +1018,60 @@ function renderUsersTable() {
     .join('');
 }
 
+async function loadAdminAnalytics(days = state.analyticsDays) {
+  state.analyticsDays = days;
+  document.querySelectorAll('.days-pill[data-admin-days]').forEach((btn) => {
+    btn.classList.toggle('active', Number(btn.dataset.adminDays) === days);
+  });
+  try {
+    state.analytics = await adminFetch(`/admin/v1/analytics?days=${encodeURIComponent(days)}`);
+    renderAdminAnalytics();
+  } catch {
+    // Non-fatal
+  }
+}
+
+async function loadBackups() {
+  try {
+    const res = await adminFetch('/admin/v1/backups');
+    state.backupsMeta = {
+      enabled: Boolean(res?.enabled),
+      intervalHours: Number(res?.intervalHours ?? 24),
+      retentionCount: Number(res?.retentionCount ?? 14),
+    };
+    state.backups = Array.isArray(res?.items) ? res.items : [];
+    renderBackupsTable();
+  } catch {
+    // Non-fatal
+  }
+}
+
+async function reloadLiveRequests() {
+  const qs = buildRequestFilterParams({ limit: PAGE_LIMIT, ...state.liveFilters });
+  const liveRes = await adminFetch(`/admin/v1/requests?${qs}`);
+  state.liveRequests = Array.isArray(liveRes?.items) ? liveRes.items : [];
+  state.liveTotal = Number.isSafeInteger(liveRes?.total) ? liveRes.total : state.liveRequests.length;
+  state.liveNextCursor = liveRes?.nextCursor ?? null;
+  renderLiveRequests();
+}
+
 async function loadOverview({ keepSelected = true } = {}) {
   state.generation += 1;
   const currentGen = state.generation;
   abortInFlight();
   const controller = new AbortController();
   state.controller = controller;
+  const liveQs = buildRequestFilterParams({ limit: PAGE_LIMIT, ...state.liveFilters });
 
-  const [modelsRes, keysRes, usersRes, liveRes] = await Promise.all([
+  const [modelsRes, keysRes, usersRes, liveRes, analyticsRes, giftcodesRes, ledgerRes, backupsRes] = await Promise.all([
     adminFetch('/admin/v1/models', { signal: controller.signal }),
     adminFetch('/admin/v1/keys', { signal: controller.signal }),
     adminFetch('/admin/v1/users', { signal: controller.signal }).catch(() => ({ items: [] })),
-    adminFetch(`/admin/v1/requests?limit=${PAGE_LIMIT}`, { signal: controller.signal }).catch(() => ({ items: [], nextCursor: null })),
+    adminFetch(`/admin/v1/requests?${liveQs}`, { signal: controller.signal }).catch(() => ({ items: [], nextCursor: null })),
+    adminFetch(`/admin/v1/analytics?days=${encodeURIComponent(state.analyticsDays)}`, { signal: controller.signal }).catch(() => null),
+    adminFetch('/admin/v1/giftcodes', { signal: controller.signal }).catch(() => ({ items: [] })),
+    adminFetch('/admin/v1/transactions?limit=50', { signal: controller.signal }).catch(() => ({ items: [], total: 0 })),
+    adminFetch('/admin/v1/backups', { signal: controller.signal }).catch(() => ({ enabled: false, items: [] })),
   ]);
   if (currentGen !== state.generation) return;
 
@@ -745,11 +1081,27 @@ async function loadOverview({ keepSelected = true } = {}) {
   state.liveRequests = Array.isArray(liveRes?.items) ? liveRes.items : [];
   state.liveTotal = Number.isSafeInteger(liveRes?.total) ? liveRes.total : state.liveRequests.length;
   state.liveNextCursor = liveRes?.nextCursor ?? null;
+  if (analyticsRes) state.analytics = analyticsRes;
+  state.giftcodes = Array.isArray(giftcodesRes?.items) ? giftcodesRes.items : [];
+  state.transactions = Array.isArray(ledgerRes?.items) ? ledgerRes.items : [];
+  state.transactionsTotal = Number.isSafeInteger(ledgerRes?.total) ? ledgerRes.total : state.transactions.length;
+  state.backupsMeta = {
+    enabled: Boolean(backupsRes?.enabled),
+    intervalHours: Number(backupsRes?.intervalHours ?? 24),
+    retentionCount: Number(backupsRes?.retentionCount ?? 14),
+  };
+  state.backups = Array.isArray(backupsRes?.items) ? backupsRes.items : [];
+
+  populateHistoryModelSelects();
   renderOverviewStats();
   renderModelsTable();
   renderKeysTable();
   renderUsersTable();
   renderLiveRequests();
+  renderAdminAnalytics();
+  renderBackupsTable();
+  renderGiftcodesTable();
+  renderLedgerTable();
 
   if (keepSelected && state.selectedKey) {
     const stillExists = state.keys.some((item) => item.id === state.selectedKey.id);
@@ -774,7 +1126,8 @@ async function loadMoreLiveRequests() {
   renderLiveRequests();
 
   try {
-    const page = await adminFetch(`/admin/v1/requests?limit=${PAGE_LIMIT}&before=${encodeURIComponent(cursor)}`);
+    const liveQs = buildRequestFilterParams({ limit: PAGE_LIMIT, before: cursor, ...state.liveFilters });
+    const page = await adminFetch(`/admin/v1/requests?${liveQs}`);
     if (currentGen !== state.generation) return;
     const incoming = Array.isArray(page?.items) ? page.items : [];
     state.liveRequests = appendRequestPage(state.liveRequests, incoming);
@@ -798,9 +1151,10 @@ async function openKeyDetail(keyId) {
   dom.detailHistoryError.classList.add('hidden');
 
   try {
+    const detailQs = buildRequestFilterParams({ limit: PAGE_LIMIT, ...state.detailFilters });
     const [detail, history] = await Promise.all([
       adminFetch(`/admin/v1/keys/${encodeURIComponent(keyId)}`),
-      adminFetch(`/admin/v1/keys/${encodeURIComponent(keyId)}/requests?limit=${PAGE_LIMIT}`),
+      adminFetch(`/admin/v1/keys/${encodeURIComponent(keyId)}/requests?${detailQs}`),
     ]);
     if (currentGen !== state.generation) return;
     state.selectedKey = detail;
@@ -825,8 +1179,9 @@ async function loadMoreDetailHistory() {
   renderSelectedDetail();
 
   try {
+    const detailQs = buildRequestFilterParams({ limit: PAGE_LIMIT, before: cursor, ...state.detailFilters });
     const page = await adminFetch(
-      `/admin/v1/keys/${encodeURIComponent(keyId)}/requests?limit=${PAGE_LIMIT}&before=${encodeURIComponent(cursor)}`,
+      `/admin/v1/keys/${encodeURIComponent(keyId)}/requests?${detailQs}`,
     );
     if (currentGen !== state.generation || state.selectedKey?.id !== keyId) return;
     const incoming = Array.isArray(page?.items) ? page.items : [];
@@ -1321,12 +1676,63 @@ dom.usersTbody.addEventListener('click', (event) => {
   const minSpent = user.usedMicros + user.reservedMicros;
   const rem = user.remainingMicros ?? Math.max(0, user.quotaMicros - minSpent);
   dom.userQuotaHint.textContent = `Đã dùng + giữ chỗ: ${formatMicrosToUsd(minSpent)} · Còn lại: ${formatMicrosToUsd(rem)}. Bấm +$1/+$5/+$10 để cộng nhanh.`;
+  if (dom.userNoteInput) dom.userNoteInput.value = '';
+  if (dom.userResetPwInput) dom.userResetPwInput.value = '';
   dom.userEnabledInput.checked = Boolean(user.enabled);
   dom.userModalError.classList.add('hidden');
   dom.userModalError.textContent = '';
   dom.userModal.showModal();
   dom.userQuotaInput.focus();
 });
+
+if (dom.userGenPwBtn && dom.userResetPwInput) {
+  dom.userGenPwBtn.addEventListener('click', () => {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#';
+    const bytes = new Uint8Array(14);
+    crypto.getRandomValues(bytes);
+    let generated = '';
+    for (let i = 0; i < bytes.length; i += 1) {
+      generated += alphabet[bytes[i] % alphabet.length];
+    }
+    dom.userResetPwInput.value = generated;
+  });
+}
+
+if (dom.userResetPwBtn && dom.userResetPwInput) {
+  dom.userResetPwBtn.addEventListener('click', async () => {
+    if (!state.editingUser) return;
+    dom.userModalError.classList.add('hidden');
+    const newPassword = dom.userResetPwInput.value;
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      dom.userModalError.textContent = 'Mật khẩu mới phải dài từ 8 đến 128 ký tự (bấm "Tự sinh" để tạo nhanh).';
+      dom.userModalError.classList.remove('hidden');
+      dom.userResetPwInput.focus();
+      return;
+    }
+    dom.userResetPwBtn.disabled = true;
+    try {
+      await adminFetch(`/admin/v1/users/${encodeURIComponent(state.editingUser.id)}/reset-password`, {
+        method: 'POST',
+        body: { newPassword },
+      });
+      let copied = '';
+      try {
+        await navigator.clipboard.writeText(newPassword);
+        copied = ' Đã sao chép mật khẩu mới vào clipboard.';
+      } catch {
+        copied = '';
+      }
+      setGlobalFeedback(`Đã đặt lại mật khẩu cho @${state.editingUser.username} và đăng xuất mọi phiên cũ.${copied}`, 'success');
+      dom.userResetPwInput.value = '';
+    } catch (error) {
+      if (error?.name === 'AbortError' || !state.authenticated) return;
+      dom.userModalError.textContent = error.message ?? 'Không thể đặt lại mật khẩu.';
+      dom.userModalError.classList.remove('hidden');
+    } finally {
+      dom.userResetPwBtn.disabled = false;
+    }
+  });
+}
 
 dom.userModal.addEventListener('click', (event) => {
   const btn = event.target.closest('button[data-add-usd]');
@@ -1349,9 +1755,10 @@ dom.userModalForm.addEventListener('submit', async (event) => {
   }
   dom.userModalSubmit.disabled = true;
   try {
+    const note = dom.userNoteInput?.value?.trim() || null;
     await adminFetch(`/admin/v1/users/${encodeURIComponent(state.editingUser.id)}`, {
       method: 'PATCH',
-      body: { quotaMicros: parsed.micros, enabled: dom.userEnabledInput.checked },
+      body: { quotaMicros: parsed.micros, enabled: dom.userEnabledInput.checked, ...(note ? { note } : {}) },
     });
     const username = state.editingUser.username;
     state.editingUser = null;
@@ -1380,21 +1787,23 @@ function updateAdminLiveUi() {
 
 async function silentPollAdmin() {
   if (!state.authenticated || !state.liveEnabled || state.pollInFlight || document.hidden) return;
-  if (dom.keyModal.open || dom.userModal.open || dom.disableModal.open || dom.revealModal.open) return;
+  if (dom.keyModal.open || dom.userModal.open || dom.disableModal.open || dom.revealModal.open || dom.giftcodeModal?.open) return;
 
   const currentGen = state.generation;
   const selectedId = state.selectedKey?.id ?? null;
   const pollLive = !state.loadingMoreLive;
   const pollDetailHist = Boolean(selectedId) && !state.loadingMoreHistory;
+  const liveQs = buildRequestFilterParams({ limit: PAGE_LIMIT, ...state.liveFilters });
+  const detailQs = buildRequestFilterParams({ limit: PAGE_LIMIT, ...state.detailFilters });
   state.pollInFlight = true;
   try {
     const [keysRes, usersRes, liveRes, detailRes, detailHistRes] = await Promise.all([
       adminFetch('/admin/v1/keys'),
       adminFetch('/admin/v1/users').catch(() => null),
-      pollLive ? adminFetch(`/admin/v1/requests?limit=${PAGE_LIMIT}`).catch(() => null) : Promise.resolve(null),
+      pollLive ? adminFetch(`/admin/v1/requests?${liveQs}`).catch(() => null) : Promise.resolve(null),
       selectedId ? adminFetch(`/admin/v1/keys/${encodeURIComponent(selectedId)}`).catch(() => null) : Promise.resolve(null),
       pollDetailHist
-        ? adminFetch(`/admin/v1/keys/${encodeURIComponent(selectedId)}/requests?limit=${PAGE_LIMIT}`).catch(() => null)
+        ? adminFetch(`/admin/v1/keys/${encodeURIComponent(selectedId)}/requests?${detailQs}`).catch(() => null)
         : Promise.resolve(null),
     ]);
     if (currentGen !== state.generation || !state.authenticated) return;
@@ -1478,9 +1887,266 @@ window.addEventListener('hashchange', () => {
 
 if (dom.keysSearch) dom.keysSearch.addEventListener('input', renderKeysTable);
 if (dom.keysStatusFilter) dom.keysStatusFilter.addEventListener('change', renderKeysTable);
-if (dom.liveSearch) dom.liveSearch.addEventListener('input', renderLiveRequests);
 if (dom.usersSearch) dom.usersSearch.addEventListener('input', renderUsersTable);
 if (dom.modelsSearch) dom.modelsSearch.addEventListener('input', renderModelsTable);
+
+if (dom.detailFilterForm) {
+  dom.detailFilterForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    state.detailFilters = {
+      fromDate: dom.detailFromDate?.value ?? '',
+      toDate: dom.detailToDate?.value ?? '',
+      model: dom.detailModelFilter?.value ?? 'all',
+      status: dom.detailStatusFilter?.value ?? 'all',
+    };
+    if (state.selectedKey) openKeyDetail(state.selectedKey.id);
+  });
+}
+
+if (dom.detailFilterReset) {
+  dom.detailFilterReset.addEventListener('click', () => {
+    if (dom.detailFromDate) dom.detailFromDate.value = '';
+    if (dom.detailToDate) dom.detailToDate.value = '';
+    if (dom.detailModelFilter) dom.detailModelFilter.value = 'all';
+    if (dom.detailStatusFilter) dom.detailStatusFilter.value = 'all';
+    state.detailFilters = { fromDate: '', toDate: '', model: 'all', status: 'all' };
+    if (state.selectedKey) openKeyDetail(state.selectedKey.id);
+  });
+}
+
+if (dom.detailExportCsvBtn) {
+  dom.detailExportCsvBtn.addEventListener('click', async () => {
+    if (!state.selectedKey) return;
+    dom.detailExportCsvBtn.disabled = true;
+    try {
+      const qs = buildRequestFilterParams(state.detailFilters);
+      await adminDownloadFile(
+        `/admin/v1/keys/${encodeURIComponent(state.selectedKey.id)}/requests.csv${qs ? `?${qs}` : ''}`,
+        `tiencoder-${state.selectedKey.keyPrefix}-requests.csv`,
+      );
+    } catch (error) {
+      if (state.authenticated) setGlobalFeedback(error.message ?? 'Không thể xuất file CSV.', 'danger');
+    } finally {
+      dom.detailExportCsvBtn.disabled = false;
+    }
+  });
+}
+
+if (dom.liveFilterForm) {
+  dom.liveFilterForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    state.liveFilters = {
+      fromDate: dom.liveFromDate?.value ?? '',
+      toDate: dom.liveToDate?.value ?? '',
+      model: dom.liveModelFilter?.value ?? 'all',
+      status: dom.liveStatusFilter?.value ?? 'all',
+      q: dom.liveSearch?.value?.trim() ?? '',
+    };
+    reloadLiveRequests().catch((err) => {
+      if (state.authenticated) setGlobalFeedback(err.message ?? 'Không thể lọc lịch sử.', 'danger');
+    });
+  });
+}
+
+if (dom.liveFilterReset) {
+  dom.liveFilterReset.addEventListener('click', () => {
+    if (dom.liveSearch) dom.liveSearch.value = '';
+    if (dom.liveFromDate) dom.liveFromDate.value = '';
+    if (dom.liveToDate) dom.liveToDate.value = '';
+    if (dom.liveModelFilter) dom.liveModelFilter.value = 'all';
+    if (dom.liveStatusFilter) dom.liveStatusFilter.value = 'all';
+    state.liveFilters = { fromDate: '', toDate: '', model: 'all', status: 'all', q: '' };
+    reloadLiveRequests().catch(() => {});
+  });
+}
+
+if (dom.liveExportCsvBtn) {
+  dom.liveExportCsvBtn.addEventListener('click', async () => {
+    dom.liveExportCsvBtn.disabled = true;
+    try {
+      const qs = buildRequestFilterParams(state.liveFilters);
+      await adminDownloadFile(
+        `/admin/v1/requests.csv${qs ? `?${qs}` : ''}`,
+        'tiencoder-all-requests.csv',
+      );
+    } catch (error) {
+      if (state.authenticated) setGlobalFeedback(error.message ?? 'Không thể xuất file CSV.', 'danger');
+    } finally {
+      dom.liveExportCsvBtn.disabled = false;
+    }
+  });
+}
+
+document.querySelectorAll('.days-pill[data-admin-days]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const days = Number(btn.dataset.adminDays) || 14;
+    loadAdminAnalytics(days);
+  });
+});
+
+if (dom.createBackupBtn) {
+  dom.createBackupBtn.addEventListener('click', async () => {
+    dom.createBackupBtn.disabled = true;
+    try {
+      const created = await adminFetch('/admin/v1/backups', { method: 'POST' });
+      setGlobalFeedback(`Đã tạo bản sao lưu SQLite: ${created.filename} (${formatBytes(created.sizeBytes)}).`, 'success');
+      await loadBackups();
+    } catch (error) {
+      if (state.authenticated) setGlobalFeedback(error.message ?? 'Không thể tạo bản sao lưu.', 'danger');
+    } finally {
+      dom.createBackupBtn.disabled = false;
+    }
+  });
+}
+
+if (dom.backupsTbody) {
+  dom.backupsTbody.addEventListener('click', async (event) => {
+    const dlBtn = event.target.closest('button[data-backup-download]');
+    if (dlBtn) {
+      const filename = dlBtn.dataset.backupDownload;
+      dlBtn.disabled = true;
+      try {
+        await adminDownloadFile(`/admin/v1/backups/${encodeURIComponent(filename)}`, filename);
+      } catch (error) {
+        if (state.authenticated) setGlobalFeedback(error.message ?? 'Không thể tải tệp sao lưu.', 'danger');
+      } finally {
+        dlBtn.disabled = false;
+      }
+      return;
+    }
+    const delBtn = event.target.closest('button[data-backup-delete]');
+    if (delBtn) {
+      const filename = delBtn.dataset.backupDelete;
+      delBtn.disabled = true;
+      try {
+        await adminFetch(`/admin/v1/backups/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        setGlobalFeedback(`Đã xóa bản sao lưu ${filename}.`, 'success');
+        await loadBackups();
+      } catch (error) {
+        if (state.authenticated) setGlobalFeedback(error.message ?? 'Không thể xóa bản sao lưu.', 'danger');
+      } finally {
+        delBtn.disabled = false;
+      }
+    }
+  });
+}
+
+if (dom.openGiftcodeBtn && dom.giftcodeModal) {
+  dom.openGiftcodeBtn.addEventListener('click', () => {
+    dom.gcCodeInput.value = '';
+    dom.gcAmountInput.value = '5';
+    dom.gcMaxUsesInput.value = '1';
+    dom.gcNoExpiry.checked = true;
+    dom.gcExpiryInput.value = '';
+    dom.gcExpiryWrap.classList.add('hidden');
+    dom.gcNoteInput.value = '';
+    dom.giftcodeModalError.classList.add('hidden');
+    dom.giftcodeModal.showModal();
+    dom.gcCodeInput.focus();
+  });
+  dom.gcNoExpiry.addEventListener('change', () => {
+    dom.gcExpiryWrap.classList.toggle('hidden', dom.gcNoExpiry.checked);
+  });
+  dom.giftcodeModal.addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-gc-usd]');
+    if (btn) dom.gcAmountInput.value = btn.dataset.gcUsd;
+  });
+  dom.giftcodeModalCancel.addEventListener('click', () => closeDialogSafe(dom.giftcodeModal));
+  dom.giftcodeModalCloseX.addEventListener('click', () => closeDialogSafe(dom.giftcodeModal));
+  dom.giftcodeModalForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    dom.giftcodeModalError.classList.add('hidden');
+    const parsedAmt = parseUsdToMicros(dom.gcAmountInput.value);
+    if (!parsedAmt.ok || parsedAmt.micros < 1) {
+      dom.giftcodeModalError.textContent = parsedAmt.ok ? 'Giá trị mã nạp phải lớn hơn $0.' : parsedAmt.error;
+      dom.giftcodeModalError.classList.remove('hidden');
+      return;
+    }
+    const maxUses = Number(dom.gcMaxUsesInput.value);
+    if (!Number.isSafeInteger(maxUses) || maxUses < 1 || maxUses > 100_000) {
+      dom.giftcodeModalError.textContent = 'Số lượt dùng tối đa phải là số nguyên từ 1 đến 100.000.';
+      dom.giftcodeModalError.classList.remove('hidden');
+      return;
+    }
+    let expiresAt = null;
+    if (!dom.gcNoExpiry.checked) {
+      const parsedExp = vnInputToIsoUtc(dom.gcExpiryInput.value);
+      if (!parsedExp.ok || !parsedExp.value) {
+        dom.giftcodeModalError.textContent = parsedExp.ok ? 'Vui lòng chọn thời điểm hết hạn.' : parsedExp.error;
+        dom.giftcodeModalError.classList.remove('hidden');
+        return;
+      }
+      expiresAt = parsedExp.value;
+    }
+    dom.giftcodeModalSubmit.disabled = true;
+    try {
+      const created = await adminFetch('/admin/v1/giftcodes', {
+        method: 'POST',
+        body: {
+          code: dom.gcCodeInput.value.trim(),
+          amountMicros: parsedAmt.micros,
+          maxUses,
+          expiresAt,
+          note: dom.gcNoteInput.value.trim() || null,
+        },
+      });
+      closeDialogSafe(dom.giftcodeModal);
+      let copied = '';
+      try {
+        await navigator.clipboard.writeText(created.code);
+        copied = ' (đã sao chép mã)';
+      } catch {
+        copied = '';
+      }
+      setGlobalFeedback(`Đã tạo mã Giftcode ${created.code} trị giá ${formatMicrosToUsd(created.amountMicros)}${copied}.`, 'success');
+      await loadOverview({ keepSelected: true });
+    } catch (error) {
+      if (state.authenticated) {
+        dom.giftcodeModalError.textContent = error.message ?? 'Không thể tạo mã Giftcode.';
+        dom.giftcodeModalError.classList.remove('hidden');
+      }
+    } finally {
+      dom.giftcodeModalSubmit.disabled = false;
+    }
+  });
+}
+
+if (dom.giftcodesTbody) {
+  dom.giftcodesTbody.addEventListener('click', async (event) => {
+    const copyBtn = event.target.closest('button[data-copy-gc]');
+    if (copyBtn) {
+      const code = copyBtn.dataset.copyGc;
+      try {
+        await navigator.clipboard.writeText(code);
+        copyBtn.textContent = 'Đã chép ✓';
+        setTimeout(() => {
+          copyBtn.textContent = 'Sao chép';
+        }, 1500);
+      } catch {
+        copyBtn.textContent = 'Ctrl+C';
+      }
+      return;
+    }
+    const toggleBtn = event.target.closest('button[data-gc-toggle]');
+    if (toggleBtn) {
+      const id = toggleBtn.dataset.gcToggle;
+      const nextEnabled = toggleBtn.dataset.gcNext === 'true';
+      toggleBtn.disabled = true;
+      try {
+        await adminFetch(`/admin/v1/giftcodes/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: { enabled: nextEnabled },
+        });
+        setGlobalFeedback(nextEnabled ? 'Đã mở lại mã Giftcode.' : 'Đã tắt mã Giftcode.', 'success');
+        await loadOverview({ keepSelected: true });
+      } catch (error) {
+        if (state.authenticated) setGlobalFeedback(error.message ?? 'Không thể cập nhật mã Giftcode.', 'danger');
+      } finally {
+        toggleBtn.disabled = false;
+      }
+    }
+  });
+}
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && state.liveEnabled && state.authenticated) silentPollAdmin();

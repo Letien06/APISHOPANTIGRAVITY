@@ -6,7 +6,7 @@
     <meta name="referrer" content="no-referrer" />
     <title>Tra cứu mức sử dụng — TienCoder API</title>
     <link rel="icon" type="image/svg+xml" href="/usage/assets/favicon.svg?v=2" />
-    <link rel="stylesheet" href="/usage/assets/usage.css?v=5" />
+    <link rel="stylesheet" href="/usage/assets/usage.css?v=6" />
   </head>
   <body>
     <div id="tc-splash" class="tc-splash" role="status" aria-live="polite" aria-label="Đang tải Tra cứu TienCoder API">
@@ -227,9 +227,42 @@
               <span class="live-dot-pulse" aria-hidden="true"></span>
               <span>Trực tiếp</span>
             </button>
+            <button id="usage-export-csv-btn" type="button" class="btn btn-outline btn-sm">Xuất CSV</button>
             <span id="history-count" class="badge badge-neutral">0 mục</span>
           </div>
         </div>
+
+        <form id="usage-filter-form" class="history-filter-bar" autocomplete="off">
+          <div class="filter-field">
+            <label for="usage-from-date">Từ ngày (UTC+7)</label>
+            <input id="usage-from-date" class="text-input" type="date" />
+          </div>
+          <div class="filter-field">
+            <label for="usage-to-date">Đến ngày (UTC+7)</label>
+            <input id="usage-to-date" class="text-input" type="date" />
+          </div>
+          <div class="filter-field">
+            <label for="usage-model-filter">Model</label>
+            <select id="usage-model-filter" class="text-input">
+              <option value="all">Tất cả model</option>
+            </select>
+          </div>
+          <div class="filter-field">
+            <label for="usage-status-filter">Trạng thái</label>
+            <select id="usage-status-filter" class="text-input">
+              <option value="all">Tất cả trạng thái</option>
+              <option value="success">Thành công</option>
+              <option value="upstream_error">Lỗi upstream</option>
+              <option value="transport_error">Lỗi kết nối</option>
+              <option value="usage_missing">Thiếu usage</option>
+              <option value="pending">Đang xử lý</option>
+            </select>
+          </div>
+          <div class="filter-actions">
+            <button type="submit" class="btn btn-dark btn-sm">Lọc</button>
+            <button id="usage-filter-reset" type="button" class="btn btn-outline btn-sm">Xóa lọc</button>
+          </div>
+        </form>
 
         <div id="history-error" class="alert alert-danger hidden" role="alert">
           <div>
@@ -279,6 +312,6 @@
       </section>
     </main>
 
-    <script type="module" src="/usage/assets/usage.js?v=5"></script>
+    <script type="module" src="/usage/assets/usage.js?v=6"></script>
   </body>
 </html>

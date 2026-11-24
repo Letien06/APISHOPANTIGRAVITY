@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, 'public');
 const SHARED_DIR = join(__dirname, 'shared');
 
-const CONSOLE_KEY_ROUTE = /^\/api\/console\/keys\/([\da-f-]{36})(\/requests|\/secret)?$/;
+const CONSOLE_KEY_ROUTE = /^\/api\/console\/keys\/([\da-f-]{36})(\/requests(?:\.csv)?|\/secret)?$/;
 
 const STATIC_ROUTES = new Map([
   ['/', { file: join(PUBLIC_DIR, 'index.html'), type: 'text/html; charset=utf-8', cache: 'no-store' }],
@@ -40,8 +40,11 @@ const ALLOWED_GET_PROXIES = new Set([
   '/api/public/models',
   '/api/auth/me',
   '/api/console/keys',
+  '/api/console/analytics',
+  '/api/console/transactions',
   '/api/usage',
   '/api/usage/requests',
+  '/api/usage/requests.csv',
   '/v1/models',
 ]);
 
@@ -49,7 +52,9 @@ const ALLOWED_POST_PROXIES = new Set([
   '/api/auth/register',
   '/api/auth/login',
   '/api/auth/logout',
+  '/api/auth/change-password',
   '/api/console/keys',
+  '/api/console/redeem',
   '/v1/chat/completions',
   '/v1/responses',
 ]);
@@ -57,6 +62,7 @@ const ALLOWED_POST_PROXIES = new Set([
 const ALLOWED_OPTIONS_PROXIES = new Set([
   '/api/usage',
   '/api/usage/requests',
+  '/api/usage/requests.csv',
   '/v1/models',
   '/v1/chat/completions',
   '/v1/responses',

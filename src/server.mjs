@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { createReadStream, mkdirSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from './config.mjs';
 import { createStore } from './store.mjs';
@@ -9,13 +9,18 @@ import { proxyInference } from './upstream.mjs';
 
 const CHAT = '/v1/chat/completions';
 const RESPONSES = '/v1/responses';
-const CORS_API_PATHS = new Set(['/v1/models', CHAT, RESPONSES, '/api/usage', '/api/usage/requests']);
-const KEY_ROUTE = /^\/admin\/v1\/keys\/([\da-f-]{36})(\/requests|\/secret)?$/;
-const ADMIN_USER_ROUTE = /^\/admin\/v1\/users\/([\da-f-]{36})$/;
-const CONSOLE_KEY_ROUTE = /^\/api\/console\/keys\/([\da-f-]{36})(\/requests|\/secret)?$/;
+const CORS_API_PATHS = new Set(['/v1/models', CHAT, RESPONSES, '/api/usage', '/api/usage/requests', '/api/usage/requests.csv']);
+const KEY_ROUTE = /^\/admin\/v1\/keys\/([\da-f-]{36})(\/requests(?:\.csv)?|\/secret)?$/;
+const ADMIN_USER_ROUTE = /^\/admin\/v1\/users\/([\da-f-]{36})(\/reset-password)?$/;
+const ADMIN_GIFTCODE_ROUTE = /^\/admin\/v1\/giftcodes\/([\da-f-]{36})$/;
+const ADMIN_BACKUP_ROUTE = /^\/admin\/v1\/backups\/(gateway-backup-[A-Za-z0-9_-]+\.sqlite)$/;
+const CONSOLE_KEY_ROUTE = /^\/api\/console\/keys\/([\da-f-]{36})(\/requests(?:\.csv)?|\/secret)?$/;
 const KEY_FIELDS = new Set(['name', 'quotaMicros', 'expiresAt', 'models', 'enabled']);
 const USER_KEY_FIELDS = new Set(['name', 'expiresAt', 'models', 'enabled']);
-const USER_PATCH_FIELDS = new Set(['quotaMicros', 'enabled']);
+const USER_PATCH_FIELDS = new Set(['quotaMicros', 'enabled', 'note']);
+const GIFTCODE_PATCH_FIELDS = new Set(['enabled', 'maxUses', 'expiresAt', 'note']);
+const VALID_REQUEST_STATUSES = new Set(['pending', 'success', 'upstream_error', 'transport_error', 'usage_missing']);
+const GIFTCODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SESSION_COOKIE = 'tc_session';
 const ADMIN_SESSION_COOKIE = 'tc_admin_session';
 const ADMIN_SESSION_TTL_MS = 24 * 3_600_000;
@@ -27,6 +32,14 @@ const STORE_ERROR_STATUS = {
   username_taken: 409,
   email_taken: 409,
   account_disabled: 403,
+  invalid_current_password: 400,
+  giftcode_exists: 409,
+  giftcode_not_found: 404,
+  giftcode_disabled: 400,
+  giftcode_expired: 400,
+  giftcode_exhausted: 409,
+  giftcode_already_used: 409,
+  backup_unconfigured: 503,
 };
 
 class HttpError extends Error {
@@ -243,7 +256,202 @@ function userPatchInput(body) {
     }
     patch.enabled = body.enabled;
   }
+  if (Object.hasOwn(body, 'note')) {
+    if (body.note !== null && (typeof body.note !== 'string' || body.note.trim().length > 200)) {
+      throw badInput('Ghi chú tối đa 200 ký tự.');
+    }
+    patch.note = body.note === null ? null : (body.note.trim() || null);
+  }
   return patch;
+}
+
+function generateGiftcodeString() {
+  const bytes = randomBytes(8);
+  let raw = '';
+  for (let i = 0; i < 8; i += 1) {
+    raw += GIFTCODE_ALPHABET[bytes[i] % GIFTCODE_ALPHABET.length];
+  }
+  return `TC-${raw.slice(0, 4)}-${raw.slice(4, 8)}`;
+}
+
+function giftcodeCreateInput(body) {
+  let code = '';
+  if (typeof body.code === 'string' && body.code.trim()) {
+    code = body.code.trim().toUpperCase();
+    if (!/^[A-Z0-9_-]{3,40}$/.test(code)) {
+      throw badInput('Mã nạp dài 3–40 ký tự, chỉ gồm chữ cái, số, dấu gạch ngang hoặc gạch dưới.');
+    }
+  } else {
+    code = generateGiftcodeString();
+  }
+  if (!Number.isSafeInteger(body.amountMicros) || body.amountMicros < 1) {
+    throw badInput('Giá trị mã nạp phải lớn hơn 0.');
+  }
+  const maxUses = Object.hasOwn(body, 'maxUses') ? body.maxUses : 1;
+  if (!Number.isSafeInteger(maxUses) || maxUses < 1 || maxUses > 100_000) {
+    throw badInput('Số lượt dùng tối đa phải là số nguyên từ 1 đến 100.000.');
+  }
+  const expiresAt = normalizeExpiry(Object.hasOwn(body, 'expiresAt') ? body.expiresAt : null);
+  let note = null;
+  if (Object.hasOwn(body, 'note') && body.note !== null) {
+    if (typeof body.note !== 'string' || body.note.trim().length > 200) {
+      throw badInput('Ghi chú mã nạp tối đa 200 ký tự.');
+    }
+    note = body.note.trim() || null;
+  }
+  return { code, amountMicros: body.amountMicros, maxUses, expiresAt, note };
+}
+
+function giftcodePatchInput(body) {
+  const entries = Object.keys(body);
+  if (entries.length === 0 || entries.some((field) => !GIFTCODE_PATCH_FIELDS.has(field))) {
+    throw badInput('Supply supported giftcode fields.');
+  }
+  const patch = {};
+  if (Object.hasOwn(body, 'enabled')) {
+    if (typeof body.enabled !== 'boolean') throw badInput('enabled must be a boolean.');
+    patch.enabled = body.enabled;
+  }
+  if (Object.hasOwn(body, 'maxUses')) {
+    if (!Number.isSafeInteger(body.maxUses) || body.maxUses < 1 || body.maxUses > 100_000) {
+      throw badInput('Số lượt dùng tối đa phải là số nguyên từ 1 đến 100.000.');
+    }
+    patch.maxUses = body.maxUses;
+  }
+  if (Object.hasOwn(body, 'expiresAt')) {
+    patch.expiresAt = normalizeExpiry(body.expiresAt);
+  }
+  if (Object.hasOwn(body, 'note')) {
+    if (body.note !== null && (typeof body.note !== 'string' || body.note.trim().length > 200)) {
+      throw badInput('Ghi chú tối đa 200 ký tự.');
+    }
+    patch.note = body.note === null ? null : (body.note.trim() || null);
+  }
+  return patch;
+}
+
+function requestFilters(searchParams, { allowQuery = false } = {}) {
+  const filters = {};
+  for (const field of ['from', 'to']) {
+    if (!searchParams.has(field)) continue;
+    const raw = searchParams.get(field)?.trim();
+    if (!raw) continue;
+    filters[field] = normalizeExpiry(raw);
+  }
+  if (searchParams.has('model')) {
+    const m = searchParams.get('model')?.trim();
+    if (m) {
+      if (m.length > 160) throw badInput('model filter is too long.');
+      filters.model = m;
+    }
+  }
+  if (searchParams.has('status')) {
+    const s = searchParams.get('status')?.trim();
+    if (s && s !== 'all') {
+      if (!VALID_REQUEST_STATUSES.has(s)) throw badInput('Trạng thái lọc không hợp lệ.');
+      filters.status = s;
+    }
+  }
+  if (allowQuery && searchParams.has('q')) {
+    const q = searchParams.get('q')?.trim();
+    if (q) {
+      if (q.length > 120) throw badInput('Từ khóa tìm kiếm quá dài.');
+      filters.q = q;
+    }
+  }
+  return filters;
+}
+
+function analyticsDays(searchParams) {
+  if (!searchParams.has('days')) return 14;
+  const raw = searchParams.get('days');
+  const val = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(val) || val < 1 || val > 90) {
+    throw badInput('days must be an integer between 1 and 90.');
+  }
+  return val;
+}
+
+const vnCsvDateFormatter = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
+function formatCsvVnTime(isoUtc) {
+  if (!isoUtc) return '';
+  const d = new Date(isoUtc);
+  return Number.isFinite(d.getTime()) ? vnCsvDateFormatter.format(d) : '';
+}
+
+function formatCsvUsd(micros) {
+  if (micros === null || micros === undefined || !Number.isSafeInteger(micros)) return '';
+  const negative = micros < 0;
+  const abs = Math.abs(micros);
+  const whole = Math.floor(abs / 1_000_000);
+  const frac = String(abs % 1_000_000).padStart(6, '0');
+  return `${negative ? '-' : ''}${whole}.${frac}`;
+}
+
+function csvCell(value, { protectFormula = false } = {}) {
+  if (value === null || value === undefined) return '';
+  let text = String(value);
+  if (protectFormula && /^[=+\-@\t\r]/.test(text)) {
+    text = `'${text}`;
+  }
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+  return text;
+}
+
+function sendRequestsCsv(res, filename, rows, { includeOwner = false } = {}) {
+  const header = includeOwner
+    ? ['ID', 'Thời điểm tạo (UTC+7)', 'Hoàn tất (UTC+7)', 'Tên khóa', 'Tiền tố khóa', 'Tài khoản', 'Model', 'Endpoint', 'Trạng thái', 'HTTP', 'Token đầu vào', 'Token bộ đệm (Cache)', 'Token đầu ra', 'Chi phí đầu vào (USD)', 'Chi phí đầu ra (USD)', 'Tổng trừ (USD)', 'Ước tính']
+    : ['ID', 'Thời điểm tạo (UTC+7)', 'Hoàn tất (UTC+7)', 'Model', 'Endpoint', 'Trạng thái', 'HTTP', 'Token đầu vào', 'Token bộ đệm (Cache)', 'Token đầu ra', 'Chi phí đầu vào (USD)', 'Chi phí đầu ra (USD)', 'Tổng trừ (USD)', 'Ước tính'];
+
+  const lines = [header.map((h) => csvCell(h)).join(',')];
+  for (const item of rows) {
+    const base = [
+      csvCell(item.id),
+      csvCell(formatCsvVnTime(item.createdAt)),
+      csvCell(formatCsvVnTime(item.finishedAt)),
+    ];
+    if (includeOwner) {
+      base.push(
+        csvCell(item.keyName ?? '', { protectFormula: true }),
+        csvCell(item.keyPrefix ?? '', { protectFormula: true }),
+        csvCell(item.username ? `@${item.username}` : '', { protectFormula: true }),
+      );
+    }
+    base.push(
+      csvCell(item.model, { protectFormula: true }),
+      csvCell(item.endpoint, { protectFormula: true }),
+      csvCell(item.status),
+      csvCell(item.httpStatus ?? ''),
+      csvCell(item.inputTokens ?? ''),
+      csvCell(item.cachedTokens ?? ''),
+      csvCell(item.outputTokens ?? ''),
+      csvCell(formatCsvUsd(item.inputCostMicros)),
+      csvCell(formatCsvUsd(item.outputCostMicros)),
+      csvCell(formatCsvUsd(item.chargedMicros)),
+      csvCell(item.estimated ? 'Có' : 'Không'),
+    );
+    lines.push(base.join(','));
+  }
+
+  const safeName = filename.replace(/[^A-Za-z0-9._-]/g, '_');
+  const body = `\uFEFF${lines.join('\r\n')}\r\n`;
+  res.writeHead(200, {
+    'content-type': 'text/csv; charset=utf-8',
+    'content-disposition': `attachment; filename="${safeName}"`,
+  });
+  res.end(body);
 }
 
 function keyStatus(key) {
@@ -386,10 +594,14 @@ export function createGateway({ config, store }) {
   const running = new Set();
   const checkAuthRate = createAuthRateLimiter();
   const checkAdminLoginRate = createAuthRateLimiter({ windowMs: 5 * 60_000, maxAttempts: 15 });
+  const checkRedeemRate = createAuthRateLimiter({ windowMs: 5 * 60_000, maxAttempts: 20 });
   const defaultUserQuotaMicros = config.defaultUserQuotaMicros ?? 1_000_000;
   const maxKeysPerUser = config.maxKeysPerUser ?? 5;
   const sessionTtlMs = config.sessionTtlMs ?? 7 * 24 * 3_600_000;
   const inviteCode = config.inviteCode ?? null;
+  const backupDir = config.backupDir ?? null;
+  const backupRetentionCount = config.backupRetentionCount ?? 14;
+  const backupIntervalHours = config.backupIntervalHours ?? 24;
 
   function authenticate(req, readOnly) {
     const key = store.findKey(bearer(req));
@@ -483,6 +695,26 @@ export function createGateway({ config, store }) {
       return json(res, 200, { user: formatUserProfile(result.user) });
     }
 
+    if (url.pathname === '/api/auth/change-password' && req.method === 'POST') {
+      assertSameOriginCsrf(req);
+      const { user, token } = authenticateSession(req);
+      checkAuthRate(req, `pw:${user.id}`);
+      const body = await readObject(req, config.maxBodyBytes);
+      const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : '';
+      const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+      if (!currentPassword) {
+        throw badInput('Vui lòng nhập mật khẩu hiện tại.');
+      }
+      if (newPassword.length < 8 || newPassword.length > 128) {
+        throw badInput('Mật khẩu mới phải dài từ 8 đến 128 ký tự.');
+      }
+      if (currentPassword === newPassword) {
+        throw badInput('Mật khẩu mới phải khác mật khẩu hiện tại.');
+      }
+      store.changeUserPassword(user.id, { currentPassword, newPassword, keepSessionToken: token });
+      return json(res, 200, { ok: true, message: 'Đã đổi mật khẩu thành công. Các thiết bị khác đã được đăng xuất.' });
+    }
+
     throw notFound();
   }
 
@@ -491,6 +723,32 @@ export function createGateway({ config, store }) {
       assertSameOriginCsrf(req);
     }
     const { user } = authenticateSession(req);
+
+    if (url.pathname === '/api/console/analytics' && req.method === 'GET') {
+      return json(res, 200, store.getAnalytics({
+        days: analyticsDays(url.searchParams),
+        userId: user.id,
+        modelsMap: config.models,
+      }));
+    }
+
+    if (url.pathname === '/api/console/transactions' && req.method === 'GET') {
+      return json(res, 200, store.listUserTransactions(user.id, page(url.searchParams)));
+    }
+
+    if (url.pathname === '/api/console/redeem' && req.method === 'POST') {
+      checkRedeemRate(req, `redeem:${user.id}`);
+      const body = await readObject(req, config.maxBodyBytes);
+      const code = typeof body.code === 'string' ? body.code.trim() : '';
+      if (!code || code.length > 64) {
+        throw badInput('Vui lòng nhập mã nạp hợp lệ.');
+      }
+      const redeemed = store.redeemGiftcode(user.id, code);
+      return json(res, 200, {
+        ...redeemed,
+        user: formatUserProfile(redeemed.user),
+      });
+    }
 
     if (url.pathname === '/api/console/keys') {
       if (req.method === 'GET') {
@@ -513,7 +771,13 @@ export function createGateway({ config, store }) {
     if (req.method === 'GET') {
       const key = store.getUserKey(user.id, id);
       if (!key) throw notFound();
-      if (sub === '/requests') return json(res, 200, store.listRequests(id, page(url.searchParams)));
+      if (sub === '/requests') {
+        return json(res, 200, store.listRequests(id, { ...page(url.searchParams), ...requestFilters(url.searchParams) }));
+      }
+      if (sub === '/requests.csv') {
+        const rows = store.exportRequests({ keyId: id, ...requestFilters(url.searchParams) });
+        return sendRequestsCsv(res, `tiencoder-${key.keyPrefix}-requests.csv`, rows, { includeOwner: false });
+      }
       if (sub === '/secret') {
         const secret = store.revealUserKeySecret(user.id, id);
         if (!secret) throw new HttpError(404, 'secret_unavailable', 'Khóa cũ không lưu bản mã hóa để sao chép lại.');
@@ -583,11 +847,105 @@ export function createGateway({ config, store }) {
     if (url.pathname === '/admin/v1/models' && req.method === 'GET') {
       return json(res, 200, { items: [...config.models.values()] });
     }
+    if (url.pathname === '/admin/v1/analytics' && req.method === 'GET') {
+      return json(res, 200, store.getAnalytics({
+        days: analyticsDays(url.searchParams),
+        userId: null,
+        modelsMap: config.models,
+      }));
+    }
+    if (url.pathname === '/admin/v1/transactions' && req.method === 'GET') {
+      const userIdFilter = url.searchParams.get('userId')?.trim() || null;
+      return json(res, 200, store.listAllTransactions({ ...page(url.searchParams), userId: userIdFilter }));
+    }
+    if (url.pathname === '/admin/v1/giftcodes') {
+      if (req.method === 'GET') {
+        return json(res, 200, { items: store.listGiftcodes() });
+      }
+      if (req.method === 'POST') {
+        const body = await readObject(req, config.maxBodyBytes);
+        return json(res, 201, store.createGiftcode(giftcodeCreateInput(body)));
+      }
+    }
+    const [, giftcodeId] = ADMIN_GIFTCODE_ROUTE.exec(url.pathname) ?? [];
+    if (giftcodeId) {
+      if (req.method === 'PATCH') {
+        const body = await readObject(req, config.maxBodyBytes);
+        const updated = store.updateGiftcode(giftcodeId, giftcodePatchInput(body));
+        if (!updated) throw notFound();
+        return json(res, 200, updated);
+      }
+      if (req.method === 'DELETE') {
+        const updated = store.updateGiftcode(giftcodeId, { enabled: false });
+        if (!updated) throw notFound();
+        res.writeHead(204);
+        return res.end();
+      }
+      throw notFound();
+    }
+    if (url.pathname === '/admin/v1/backups') {
+      if (req.method === 'GET') {
+        return json(res, 200, {
+          enabled: Boolean(backupDir),
+          intervalHours: backupIntervalHours,
+          retentionCount: backupRetentionCount,
+          items: store.listBackups(backupDir),
+        });
+      }
+      if (req.method === 'POST') {
+        const created = store.createBackup(backupDir, { label: 'manual', retentionCount: backupRetentionCount });
+        return json(res, 201, created);
+      }
+    }
+    const [, backupFilename] = ADMIN_BACKUP_ROUTE.exec(url.pathname) ?? [];
+    if (backupFilename) {
+      if (!backupDir) throw new HttpError(503, 'backup_unconfigured', 'Chưa cấu hình thư mục sao lưu SQLite.');
+      const fullPath = join(backupDir, backupFilename);
+      let st;
+      try {
+        st = statSync(fullPath);
+      } catch {
+        throw notFound();
+      }
+      if (!st.isFile()) throw notFound();
+      if (req.method === 'GET') {
+        res.writeHead(200, {
+          'content-type': 'application/vnd.sqlite3',
+          'content-length': String(st.size),
+          'content-disposition': `attachment; filename="${backupFilename}"`,
+        });
+        await new Promise((resolve, reject) => {
+          const stream = createReadStream(fullPath);
+          stream.on('error', reject);
+          res.on('close', resolve);
+          res.on('finish', resolve);
+          stream.pipe(res);
+        });
+        return;
+      }
+      if (req.method === 'DELETE') {
+        rmSync(fullPath, { force: true });
+        res.writeHead(204);
+        return res.end();
+      }
+      throw notFound();
+    }
     if (url.pathname === '/admin/v1/users' && req.method === 'GET') {
       return json(res, 200, { items: store.listUsers().map(formatUserProfile) });
     }
-    const [, userId] = ADMIN_USER_ROUTE.exec(url.pathname) ?? [];
+    const [, userId, userSub] = ADMIN_USER_ROUTE.exec(url.pathname) ?? [];
     if (userId) {
+      if (userSub === '/reset-password') {
+        if (req.method !== 'POST') throw notFound();
+        const body = await readObject(req, config.maxBodyBytes);
+        const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+        if (newPassword.length < 8 || newPassword.length > 128) {
+          throw badInput('Mật khẩu mới phải dài từ 8 đến 128 ký tự.');
+        }
+        const updated = store.resetUserPassword(userId, newPassword);
+        if (!updated) throw notFound();
+        return json(res, 200, { ok: true, user: formatUserProfile(updated) });
+      }
       if (req.method === 'GET') {
         const found = store.getUser(userId);
         if (!found) throw notFound();
@@ -602,7 +960,14 @@ export function createGateway({ config, store }) {
       throw notFound();
     }
     if (url.pathname === '/admin/v1/requests' && req.method === 'GET') {
-      return json(res, 200, store.listAllRequests(page(url.searchParams)));
+      return json(res, 200, store.listAllRequests({
+        ...page(url.searchParams),
+        ...requestFilters(url.searchParams, { allowQuery: true }),
+      }));
+    }
+    if (url.pathname === '/admin/v1/requests.csv' && req.method === 'GET') {
+      const rows = store.exportRequests(requestFilters(url.searchParams, { allowQuery: true }));
+      return sendRequestsCsv(res, 'tiencoder-all-requests.csv', rows, { includeOwner: true });
     }
     if (url.pathname === '/admin/v1/keys') {
       if (req.method === 'GET') return json(res, 200, { items: store.listKeys().map(withStatus) });
@@ -616,7 +981,13 @@ export function createGateway({ config, store }) {
     if (req.method === 'GET') {
       const key = store.getKey(id);
       if (!key) throw notFound();
-      if (sub === '/requests') return json(res, 200, store.listRequests(id, page(url.searchParams)));
+      if (sub === '/requests') {
+        return json(res, 200, store.listRequests(id, { ...page(url.searchParams), ...requestFilters(url.searchParams) }));
+      }
+      if (sub === '/requests.csv') {
+        const rows = store.exportRequests({ keyId: id, ...requestFilters(url.searchParams) });
+        return sendRequestsCsv(res, `tiencoder-${key.keyPrefix}-requests.csv`, rows, { includeOwner: true });
+      }
       if (sub === '/secret') {
         const secret = store.revealKeySecret(id);
         if (!secret) throw new HttpError(404, 'secret_unavailable', 'Khóa cũ không lưu bản mã hóa để sao chép lại.');
@@ -722,9 +1093,14 @@ export function createGateway({ config, store }) {
       if (pathname.startsWith('/api/auth/')) return await authRoutes(req, res, url);
       if (pathname.startsWith('/api/console/')) return await consoleRoutes(req, res, url);
 
-      if (req.method === 'GET' && ['/api/usage', '/api/usage/requests'].includes(pathname)) {
+      if (req.method === 'GET' && ['/api/usage', '/api/usage/requests', '/api/usage/requests.csv'].includes(pathname)) {
         const key = authenticate(req, true);
-        const result = pathname === '/api/usage' ? withStatus(key) : store.listRequests(key.id, page(url.searchParams));
+        if (pathname === '/api/usage') return json(res, 200, withStatus(key));
+        if (pathname === '/api/usage/requests.csv') {
+          const rows = store.exportRequests({ keyId: key.id, ...requestFilters(url.searchParams) });
+          return sendRequestsCsv(res, `tiencoder-${key.keyPrefix}-requests.csv`, rows, { includeOwner: false });
+        }
+        const result = store.listRequests(key.id, { ...page(url.searchParams), ...requestFilters(url.searchParams) });
         return json(res, 200, result);
       }
 
@@ -780,7 +1156,35 @@ function start() {
     process.exitCode = 1;
   });
   server.listen(config.port, config.host, () => console.info(`Gateway listening on ${config.host}:${config.port}`));
+
+  let backupStartupTimer = null;
+  let backupIntervalTimer = null;
+  if (config.backupDir && config.backupIntervalHours > 0) {
+    const intervalMs = config.backupIntervalHours * 3_600_000;
+    const runScheduledBackup = () => {
+      try {
+        const result = store.createBackup(config.backupDir, {
+          label: 'auto',
+          retentionCount: config.backupRetentionCount ?? 14,
+        });
+        console.info(`Scheduled SQLite backup created: ${result.filename} (${result.sizeBytes} bytes)`);
+      } catch (error) {
+        console.error('Scheduled SQLite backup failed:', error.message);
+      }
+    };
+    const existing = store.listBackups(config.backupDir);
+    const newestMs = existing[0] ? Date.parse(existing[0].createdAt) : 0;
+    if (!newestMs || Date.now() - newestMs >= intervalMs) {
+      backupStartupTimer = setTimeout(runScheduledBackup, 30_000);
+      backupStartupTimer.unref?.();
+    }
+    backupIntervalTimer = setInterval(runScheduledBackup, intervalMs);
+    backupIntervalTimer.unref?.();
+  }
+
   function shutdown() {
+    if (backupStartupTimer) clearTimeout(backupStartupTimer);
+    if (backupIntervalTimer) clearInterval(backupIntervalTimer);
     server.close(async () => {
       await server.waitForRequests();
       store.close();

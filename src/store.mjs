@@ -1,8 +1,12 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
+import { chmodSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 const digest = (secret) => createHash('sha256').update(secret).digest('hex')
 const nowIso = () => new Date().toISOString()
+const VN_OFFSET_MS = 7 * 60 * 60 * 1000
+const BACKUP_FILE_RE = /^gateway-backup-[A-Za-z0-9_-]+\.sqlite$/
 
 function deriveVaultKey(encryptionSecret) {
   if (typeof encryptionSecret !== 'string' || !encryptionSecret) return null
@@ -73,6 +77,64 @@ function storeError(code, message) {
   const error = new Error(message)
   error.code = code
   return error
+}
+
+function describeTransaction(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    username: row.username ?? null,
+    email: row.email ?? null,
+    deltaMicros: row.delta_micros,
+    balanceAfterMicros: row.balance_after_micros,
+    type: row.type,
+    note: row.note ?? null,
+    refCode: row.ref_code ?? null,
+    createdAt: row.created_at,
+  }
+}
+
+function describeGiftcode(row) {
+  let status = 'active'
+  if (!row.enabled) status = 'disabled'
+  else if (row.expires_at !== null && Date.parse(row.expires_at) <= Date.now()) status = 'expired'
+  else if (row.used_count >= row.max_uses) status = 'exhausted'
+  return {
+    id: row.id,
+    code: row.code,
+    amountMicros: row.amount_micros,
+    maxUses: row.max_uses,
+    usedCount: row.used_count,
+    enabled: Boolean(row.enabled),
+    expiresAt: row.expires_at,
+    note: row.note ?? null,
+    createdAt: row.created_at,
+    status,
+  }
+}
+
+function toVnDateKey(ms) {
+  const vn = new Date(ms + VN_OFFSET_MS)
+  const y = vn.getUTCFullYear()
+  const m = String(vn.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(vn.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function vnDayStartUtcIso(vnDateKey) {
+  const [y, m, d] = vnDateKey.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) - VN_OFFSET_MS).toISOString()
+}
+
+function formatBackupStamp(ms) {
+  const vn = new Date(ms + VN_OFFSET_MS)
+  const y = vn.getUTCFullYear()
+  const m = String(vn.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(vn.getUTCDate()).padStart(2, '0')
+  const hh = String(vn.getUTCHours()).padStart(2, '0')
+  const mm = String(vn.getUTCMinutes()).padStart(2, '0')
+  const ss = String(vn.getUTCSeconds()).padStart(2, '0')
+  return `${y}${m}${d}-${hh}${mm}${ss}`
 }
 
 export function createStore(databasePath, { encryptionSecret = null } = {}) {
@@ -155,8 +217,39 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
         finished_at TEXT
       ) STRICT;
       CREATE INDEX IF NOT EXISTS gateway_requests_key_cursor ON gateway_requests(key_id, id DESC);
+      CREATE INDEX IF NOT EXISTS gateway_requests_created_at ON gateway_requests(created_at DESC);
       CREATE INDEX IF NOT EXISTS gateway_requests_lease ON gateway_requests(lease_expires_at)
         WHERE status = 'pending';
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id INTEGER PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES gateway_users(id) ON DELETE CASCADE,
+        delta_micros INTEGER NOT NULL,
+        balance_after_micros INTEGER NOT NULL CHECK (balance_after_micros >= 0),
+        type TEXT NOT NULL CHECK (type IN ('signup_bonus', 'admin_adjust', 'giftcode')),
+        note TEXT,
+        ref_code TEXT,
+        created_at TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS wallet_tx_user_cursor ON wallet_transactions(user_id, id DESC);
+      CREATE TABLE IF NOT EXISTS giftcodes (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        amount_micros INTEGER NOT NULL CHECK (amount_micros > 0),
+        max_uses INTEGER NOT NULL DEFAULT 1 CHECK (max_uses >= 1),
+        used_count INTEGER NOT NULL DEFAULT 0 CHECK (used_count >= 0),
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        expires_at TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS giftcode_redemptions (
+        id INTEGER PRIMARY KEY,
+        giftcode_id TEXT NOT NULL REFERENCES giftcodes(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES gateway_users(id) ON DELETE CASCADE,
+        amount_micros INTEGER NOT NULL CHECK (amount_micros > 0),
+        created_at TEXT NOT NULL,
+        UNIQUE(giftcode_id, user_id)
+      ) STRICT;
     `)
 
     // Migrate existing databases cleanly
@@ -255,6 +348,36 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
     `)
     const writeUser = db.prepare(`
       UPDATE gateway_users SET quota_micros = ?, enabled = ? WHERE id = ? RETURNING *
+    `)
+    const writeUserPassword = db.prepare(`
+      UPDATE gateway_users SET password_hash = ? WHERE id = ? RETURNING *
+    `)
+    const removeOtherUserSessions = db.prepare(`
+      DELETE FROM gateway_sessions WHERE user_id = ? AND token_hash != ?
+    `)
+    const insertWalletTx = db.prepare(`
+      INSERT INTO wallet_transactions (user_id, delta_micros, balance_after_micros, type, note, ref_code, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *
+    `)
+    const insertGiftcode = db.prepare(`
+      INSERT INTO giftcodes (id, code, amount_micros, max_uses, used_count, enabled, expires_at, note, created_at)
+      VALUES (?, ?, ?, ?, 0, 1, ?, ?, ?) RETURNING *
+    `)
+    const listGiftcodeRows = db.prepare('SELECT * FROM giftcodes ORDER BY created_at DESC, id DESC')
+    const getGiftcodeById = db.prepare('SELECT * FROM giftcodes WHERE id = ?')
+    const getGiftcodeByCode = db.prepare('SELECT * FROM giftcodes WHERE code = ?')
+    const writeGiftcode = db.prepare(`
+      UPDATE giftcodes SET enabled = ?, max_uses = ?, expires_at = ?, note = ? WHERE id = ? RETURNING *
+    `)
+    const incrementGiftcodeUse = db.prepare(`
+      UPDATE giftcodes SET used_count = used_count + 1 WHERE id = ? RETURNING *
+    `)
+    const findRedemption = db.prepare(`
+      SELECT id FROM giftcode_redemptions WHERE giftcode_id = ? AND user_id = ?
+    `)
+    const insertRedemption = db.prepare(`
+      INSERT INTO giftcode_redemptions (giftcode_id, user_id, amount_micros, created_at)
+      VALUES (?, ?, ?, ?)
     `)
     const userKeyAggregates = db.prepare(`
       SELECT
@@ -472,20 +595,90 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           }
         })
       },
-      listRequests(keyId, { limit = 50, before = null } = {}) {
+      listRequests(keyId, { limit = 50, before = null, from = null, to = null, model = null, status = null } = {}) {
         recoverBeforeRead()
-        const rows = before === null
-          ? latestRequests.all(keyId, limit + 1)
-          : earlierRequests.all(keyId, before, limit + 1)
+        const clauses = ['key_id = ?']
+        const params = [keyId]
+        if (from) {
+          clauses.push('created_at >= ?')
+          params.push(from)
+        }
+        if (to) {
+          clauses.push('created_at <= ?')
+          params.push(to)
+        }
+        if (model) {
+          clauses.push('model = ?')
+          params.push(model)
+        }
+        if (status) {
+          clauses.push('status = ?')
+          params.push(status)
+        }
+        const countWhere = clauses.join(' AND ')
+        const total = Number(db.prepare(`SELECT COUNT(*) AS total FROM gateway_requests WHERE ${countWhere}`).get(...params)?.total ?? 0)
+        const pageClauses = [...clauses]
+        const pageParams = [...params]
+        if (before !== null) {
+          pageClauses.push('id < ?')
+          pageParams.push(before)
+        }
+        pageParams.push(limit + 1)
+        const rows = db.prepare(
+          `SELECT * FROM gateway_requests WHERE ${pageClauses.join(' AND ')} ORDER BY id DESC LIMIT ?`,
+        ).all(...pageParams)
         const items = rows.slice(0, limit).map(describeRequest)
-        const total = Number(countKeyRequests.get(keyId)?.total ?? items.length)
         return { items, nextCursor: rows.length > limit ? items.at(-1).id : null, total }
       },
-      listAllRequests({ limit = 50, before = null } = {}) {
+      listAllRequests({ limit = 50, before = null, from = null, to = null, model = null, status = null, q = null } = {}) {
         recoverBeforeRead()
-        const rows = before === null
-          ? latestAllRequests.all(limit + 1)
-          : earlierAllRequests.all(before, limit + 1)
+        const clauses = []
+        const params = []
+        if (from) {
+          clauses.push('r.created_at >= ?')
+          params.push(from)
+        }
+        if (to) {
+          clauses.push('r.created_at <= ?')
+          params.push(to)
+        }
+        if (model) {
+          clauses.push('r.model = ?')
+          params.push(model)
+        }
+        if (status) {
+          clauses.push('r.status = ?')
+          params.push(status)
+        }
+        if (q) {
+          const like = `%${q.toLowerCase()}%`
+          clauses.push('(LOWER(COALESCE(k.name, \'\')) LIKE ? OR LOWER(COALESCE(k.key_prefix, \'\')) LIKE ? OR LOWER(COALESCE(u.username, \'\')) LIKE ? OR LOWER(r.model) LIKE ?)')
+          params.push(like, like, like, like)
+        }
+        const whereSql = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+        const total = Number(db.prepare(`
+          SELECT COUNT(*) AS total
+          FROM gateway_requests r
+          LEFT JOIN gateway_keys k ON k.id = r.key_id
+          LEFT JOIN gateway_users u ON u.id = k.user_id
+          ${whereSql}
+        `).get(...params)?.total ?? 0)
+        const pageClauses = [...clauses]
+        const pageParams = [...params]
+        if (before !== null) {
+          pageClauses.push('r.id < ?')
+          pageParams.push(before)
+        }
+        const pageWhere = pageClauses.length ? `WHERE ${pageClauses.join(' AND ')}` : ''
+        pageParams.push(limit + 1)
+        const rows = db.prepare(`
+          SELECT r.*, k.name AS key_name, k.key_prefix AS key_prefix, u.username AS username
+          FROM gateway_requests r
+          LEFT JOIN gateway_keys k ON k.id = r.key_id
+          LEFT JOIN gateway_users u ON u.id = k.user_id
+          ${pageWhere}
+          ORDER BY r.id DESC LIMIT ?
+        `).all(...pageParams)
         const items = rows.slice(0, limit).map((row) => ({
           ...describeRequest(row),
           keyId: row.key_id,
@@ -493,8 +686,53 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           keyPrefix: row.key_prefix ?? '',
           username: row.username ?? null,
         }))
-        const total = Number(countAllRequests.get()?.total ?? items.length)
         return { items, nextCursor: rows.length > limit ? items.at(-1).id : null, total }
+      },
+      exportRequests({ keyId = null, from = null, to = null, model = null, status = null, q = null, maxRows = 5000 } = {}) {
+        recoverBeforeRead()
+        const clauses = []
+        const params = []
+        if (keyId) {
+          clauses.push('r.key_id = ?')
+          params.push(keyId)
+        }
+        if (from) {
+          clauses.push('r.created_at >= ?')
+          params.push(from)
+        }
+        if (to) {
+          clauses.push('r.created_at <= ?')
+          params.push(to)
+        }
+        if (model) {
+          clauses.push('r.model = ?')
+          params.push(model)
+        }
+        if (status) {
+          clauses.push('r.status = ?')
+          params.push(status)
+        }
+        if (q) {
+          const like = `%${q.toLowerCase()}%`
+          clauses.push('(LOWER(COALESCE(k.name, \'\')) LIKE ? OR LOWER(COALESCE(k.key_prefix, \'\')) LIKE ? OR LOWER(COALESCE(u.username, \'\')) LIKE ? OR LOWER(r.model) LIKE ?)')
+          params.push(like, like, like, like)
+        }
+        const whereSql = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+        params.push(maxRows)
+        return db.prepare(`
+          SELECT r.*, k.name AS key_name, k.key_prefix AS key_prefix, u.username AS username
+          FROM gateway_requests r
+          LEFT JOIN gateway_keys k ON k.id = r.key_id
+          LEFT JOIN gateway_users u ON u.id = k.user_id
+          ${whereSql}
+          ORDER BY r.id DESC LIMIT ?
+        `).all(...params).map((row) => ({
+          ...describeRequest(row),
+          keyId: row.key_id,
+          keyName: row.key_name ?? 'Không rõ',
+          keyPrefix: row.key_prefix ?? '',
+          username: row.username ?? null,
+        }))
       },
       revealKeySecret(keyId) {
         const row = getKeyRow.get(keyId)
@@ -513,10 +751,39 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
           if (getUserByEmail.get(normalizedEmail)) {
             throw storeError('email_taken', 'Email này đã được đăng ký.')
           }
+          const createdAt = nowIso()
           const row = insertUser.get(
-            randomUUID(), normalizedUser, normalizedEmail, hashPassword(password), quotaMicros, nowIso(),
+            randomUUID(), normalizedUser, normalizedEmail, hashPassword(password), quotaMicros, createdAt,
           )
+          if (quotaMicros > 0) {
+            insertWalletTx.get(row.id, quotaMicros, quotaMicros, 'signup_bonus', 'Số dư khởi tạo khi đăng ký tài khoản', null, createdAt)
+          }
           return summarizeUser(row)
+        })
+      },
+      changeUserPassword(userId, { currentPassword, newPassword, keepSessionToken = null }) {
+        return transaction(() => {
+          const row = getUserById.get(userId)
+          if (!row || !row.enabled) throw storeError('account_disabled', 'Tài khoản đã bị vô hiệu hóa.')
+          if (!verifyPassword(currentPassword, row.password_hash)) {
+            throw storeError('invalid_current_password', 'Mật khẩu hiện tại không đúng.')
+          }
+          writeUserPassword.get(hashPassword(newPassword), userId)
+          if (typeof keepSessionToken === 'string' && keepSessionToken.startsWith('sess_')) {
+            removeOtherUserSessions.run(userId, digest(keepSessionToken))
+          } else {
+            removeUserSessions.run(userId)
+          }
+          return true
+        })
+      },
+      resetUserPassword(userId, newPassword) {
+        return transaction(() => {
+          const row = getUserById.get(userId)
+          if (!row) return null
+          const updated = writeUserPassword.get(hashPassword(newPassword), userId)
+          removeUserSessions.run(userId)
+          return summarizeUser(updated)
         })
       },
       authenticateUser({ identifier, password }) {
@@ -605,16 +872,321 @@ export function createStore(databasePath, { encryptionSecret = null } = {}) {
               'Hạn mức ví không được thấp hơn tổng số đã dùng và đang giữ chỗ.',
             )
           }
+          const nextQuota = patch.quotaMicros ?? row.quota_micros
           const updated = writeUser.get(
-            patch.quotaMicros ?? row.quota_micros,
+            nextQuota,
             patch.enabled === undefined ? row.enabled : Number(patch.enabled),
             id,
           )
+          if (nextQuota !== row.quota_micros) {
+            const delta = nextQuota - row.quota_micros
+            const defaultNote = delta > 0 ? 'Admin nạp thêm hạn mức ví' : 'Admin điều chỉnh giảm hạn mức ví'
+            insertWalletTx.get(id, delta, nextQuota, 'admin_adjust', patch.note || defaultNote, null, nowIso())
+          }
           if (patch.enabled === false) {
             removeUserSessions.run(id)
           }
           return summarizeUser(updated)
         })
+      },
+      listUserTransactions(userId, { limit = 50, before = null } = {}) {
+        const clauses = ['t.user_id = ?']
+        const params = [userId]
+        const total = Number(db.prepare('SELECT COUNT(*) AS total FROM wallet_transactions WHERE user_id = ?').get(userId)?.total ?? 0)
+        if (before !== null) {
+          clauses.push('t.id < ?')
+          params.push(before)
+        }
+        params.push(limit + 1)
+        const rows = db.prepare(`
+          SELECT t.*, u.username AS username, u.email AS email
+          FROM wallet_transactions t
+          JOIN gateway_users u ON u.id = t.user_id
+          WHERE ${clauses.join(' AND ')}
+          ORDER BY t.id DESC LIMIT ?
+        `).all(...params)
+        const items = rows.slice(0, limit).map(describeTransaction)
+        return { items, nextCursor: rows.length > limit ? items.at(-1).id : null, total }
+      },
+      listAllTransactions({ limit = 50, before = null, userId = null } = {}) {
+        const clauses = []
+        const params = []
+        if (userId) {
+          clauses.push('t.user_id = ?')
+          params.push(userId)
+        }
+        const whereSql = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+        const total = Number(db.prepare(`SELECT COUNT(*) AS total FROM wallet_transactions t ${whereSql}`).get(...params)?.total ?? 0)
+        const pageClauses = [...clauses]
+        const pageParams = [...params]
+        if (before !== null) {
+          pageClauses.push('t.id < ?')
+          pageParams.push(before)
+        }
+        const pageWhere = pageClauses.length ? `WHERE ${pageClauses.join(' AND ')}` : ''
+        pageParams.push(limit + 1)
+        const rows = db.prepare(`
+          SELECT t.*, u.username AS username, u.email AS email
+          FROM wallet_transactions t
+          JOIN gateway_users u ON u.id = t.user_id
+          ${pageWhere}
+          ORDER BY t.id DESC LIMIT ?
+        `).all(...pageParams)
+        const items = rows.slice(0, limit).map(describeTransaction)
+        return { items, nextCursor: rows.length > limit ? items.at(-1).id : null, total }
+      },
+      createGiftcode({ code, amountMicros, maxUses = 1, expiresAt = null, note = null }) {
+        const normalized = code.trim().toUpperCase()
+        return transaction(() => {
+          if (getGiftcodeByCode.get(normalized)) {
+            throw storeError('giftcode_exists', 'Mã nạp Giftcode này đã tồn tại.')
+          }
+          const row = insertGiftcode.get(
+            randomUUID(), normalized, amountMicros, maxUses, expiresAt, note, nowIso(),
+          )
+          return describeGiftcode(row)
+        })
+      },
+      listGiftcodes() {
+        return listGiftcodeRows.all().map(describeGiftcode)
+      },
+      updateGiftcode(id, patch) {
+        return transaction(() => {
+          const row = getGiftcodeById.get(id)
+          if (!row) return null
+          const nextMaxUses = patch.maxUses ?? row.max_uses
+          if (nextMaxUses < row.used_count) {
+            throw storeError('invalid_request', 'Số lượt dùng tối đa không thể nhỏ hơn số lượt đã sử dụng.')
+          }
+          const updated = writeGiftcode.get(
+            patch.enabled === undefined ? row.enabled : Number(patch.enabled),
+            nextMaxUses,
+            patch.expiresAt === undefined ? row.expires_at : patch.expiresAt,
+            patch.note === undefined ? row.note : patch.note,
+            id,
+          )
+          return describeGiftcode(updated)
+        })
+      },
+      redeemGiftcode(userId, rawCode) {
+        const normalized = String(rawCode ?? '').trim().toUpperCase()
+        return transaction(() => {
+          recoverStale(Date.now())
+          const user = getUserById.get(userId)
+          if (!user || !user.enabled) throw storeError('account_disabled', 'Tài khoản đã bị vô hiệu hóa.')
+          const gift = getGiftcodeByCode.get(normalized)
+          if (!gift) throw storeError('giftcode_not_found', 'Mã nạp không tồn tại. Vui lòng kiểm tra lại.')
+          if (!gift.enabled) throw storeError('giftcode_disabled', 'Mã nạp này đã bị vô hiệu hóa.')
+          if (gift.expires_at !== null && Date.parse(gift.expires_at) <= Date.now()) {
+            throw storeError('giftcode_expired', 'Mã nạp này đã hết hạn sử dụng.')
+          }
+          if (gift.used_count >= gift.max_uses) {
+            throw storeError('giftcode_exhausted', 'Mã nạp này đã hết lượt sử dụng.')
+          }
+          if (findRedemption.get(gift.id, userId)) {
+            throw storeError('giftcode_already_used', 'Tài khoản của bạn đã sử dụng mã nạp này trước đó.')
+          }
+          const now = nowIso()
+          insertRedemption.run(gift.id, userId, gift.amount_micros, now)
+          const updatedGift = incrementGiftcodeUse.get(gift.id)
+          const nextQuota = user.quota_micros + gift.amount_micros
+          const updatedUser = writeUser.get(nextQuota, user.enabled, userId)
+          const txNote = gift.note ? `Mã nạp ${gift.code} · ${gift.note}` : `Nạp ví bằng mã ${gift.code}`
+          const tx = insertWalletTx.get(userId, gift.amount_micros, nextQuota, 'giftcode', txNote, gift.code, now)
+          return {
+            giftcode: describeGiftcode(updatedGift),
+            user: summarizeUser(updatedUser),
+            transaction: describeTransaction({ ...tx, username: updatedUser.username, email: updatedUser.email }),
+          }
+        })
+      },
+      getAnalytics({ days = 14, userId = null, modelsMap = null } = {}) {
+        recoverBeforeRead()
+        const safeDays = Math.min(90, Math.max(1, Number(days) || 14))
+        const nowMs = Date.now()
+        const todayKey = toVnDateKey(nowMs)
+        const dayKeys = []
+        for (let offset = safeDays - 1; offset >= 0; offset -= 1) {
+          dayKeys.push(toVnDateKey(nowMs - offset * 86_400_000))
+        }
+        const startIso = vnDayStartUtcIso(dayKeys[0])
+        const dailyMap = new Map(
+          dayKeys.map((date) => [date, { date, requests: 0, spentMicros: 0, savedMicros: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0 }]),
+        )
+
+        const rows = userId
+          ? db.prepare(`
+              SELECT r.created_at, r.model, r.status, r.input_tokens, r.output_tokens, r.cached_tokens, r.charged_micros
+              FROM gateway_requests r
+              JOIN gateway_keys k ON k.id = r.key_id
+              WHERE k.user_id = ? AND r.created_at >= ?
+            `).all(userId, startIso)
+          : db.prepare(`
+              SELECT r.created_at, r.model, r.status, r.input_tokens, r.output_tokens, r.cached_tokens, r.charged_micros,
+                     k.user_id AS user_id, u.username AS username
+              FROM gateway_requests r
+              LEFT JOIN gateway_keys k ON k.id = r.key_id
+              LEFT JOIN gateway_users u ON u.id = k.user_id
+              WHERE r.created_at >= ?
+            `).all(startIso)
+
+        let totalRequests = 0
+        let successRequests = 0
+        let errorRequests = 0
+        let periodSpentMicros = 0
+        let periodSavedMicros = 0
+        let todaySpentMicros = 0
+        let totalInputTokens = 0
+        let totalCachedTokens = 0
+        let totalOutputTokens = 0
+        const byModel = new Map()
+        const byUser = new Map()
+
+        for (const r of rows) {
+          const ms = Date.parse(r.created_at)
+          const dayKey = Number.isFinite(ms) ? toVnDateKey(ms) : todayKey
+          const bucket = dailyMap.get(dayKey)
+          const spent = Number(r.charged_micros ?? 0)
+          const inTok = Number(r.input_tokens ?? 0)
+          const outTok = Number(r.output_tokens ?? 0)
+          const cachedTok = Number(r.cached_tokens ?? 0)
+          let saved = 0
+          if (cachedTok > 0) {
+            const cfg = modelsMap?.get(r.model)
+            if (cfg) {
+              const cachedRate = cfg.cachedInputMicrosPerMillion ?? Math.round(cfg.inputMicrosPerMillion * 0.25)
+              const deltaRate = Math.max(0, cfg.inputMicrosPerMillion - cachedRate)
+              saved = Number((BigInt(cachedTok) * BigInt(deltaRate)) / 1_000_000n)
+            }
+          }
+
+          totalRequests += 1
+          if (r.status === 'success') successRequests += 1
+          else if (r.status !== 'pending') errorRequests += 1
+          periodSpentMicros += spent
+          periodSavedMicros += saved
+          if (dayKey === todayKey) todaySpentMicros += spent
+          totalInputTokens += inTok
+          totalCachedTokens += cachedTok
+          totalOutputTokens += outTok
+
+          if (bucket) {
+            bucket.requests += 1
+            bucket.spentMicros += spent
+            bucket.savedMicros += saved
+            bucket.inputTokens += inTok
+            bucket.cachedTokens += cachedTok
+            bucket.outputTokens += outTok
+          }
+
+          const mAcc = byModel.get(r.model) ?? {
+            model: r.model, requests: 0, spentMicros: 0, savedMicros: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0,
+          }
+          mAcc.requests += 1
+          mAcc.spentMicros += spent
+          mAcc.savedMicros += saved
+          mAcc.inputTokens += inTok
+          mAcc.cachedTokens += cachedTok
+          mAcc.outputTokens += outTok
+          byModel.set(r.model, mAcc)
+
+          if (!userId && r.user_id) {
+            const uAcc = byUser.get(r.user_id) ?? {
+              userId: r.user_id, username: r.username ?? 'unknown', requests: 0, spentMicros: 0, savedMicros: 0,
+            }
+            uAcc.requests += 1
+            uAcc.spentMicros += spent
+            uAcc.savedMicros += saved
+            byUser.set(r.user_id, uAcc)
+          }
+        }
+
+        const topModels = [...byModel.values()]
+          .sort((a, b) => b.spentMicros - a.spentMicros || b.requests - a.requests)
+          .slice(0, 10)
+
+        const topUsers = !userId
+          ? [...byUser.values()]
+              .sort((a, b) => b.spentMicros - a.spentMicros || b.requests - a.requests)
+              .slice(0, 10)
+              .map((entry) => {
+                const wallet = getUserWallet(entry.userId)
+                return { ...entry, remainingMicros: wallet?.remainingMicros ?? 0 }
+              })
+          : []
+
+        const txSumRow = userId
+          ? db.prepare('SELECT COALESCE(SUM(CASE WHEN delta_micros > 0 THEN delta_micros ELSE 0 END), 0) AS total FROM wallet_transactions WHERE user_id = ? AND created_at >= ?').get(userId, startIso)
+          : db.prepare('SELECT COALESCE(SUM(CASE WHEN delta_micros > 0 THEN delta_micros ELSE 0 END), 0) AS total FROM wallet_transactions WHERE created_at >= ?').get(startIso)
+
+        return {
+          days: safeDays,
+          todayKey,
+          summary: {
+            todaySpentMicros,
+            periodSpentMicros,
+            periodSavedMicros,
+            periodTopupMicros: Number(txSumRow?.total ?? 0),
+            totalRequests,
+            successRequests,
+            errorRequests,
+            totalInputTokens,
+            totalCachedTokens,
+            totalOutputTokens,
+          },
+          daily: [...dailyMap.values()],
+          topModels,
+          topUsers,
+        }
+      },
+      createBackup(backupDir, { label = 'manual', retentionCount = 14 } = {}) {
+        if (!backupDir) throw storeError('backup_unconfigured', 'Chưa cấu hình thư mục sao lưu SQLite.')
+        mkdirSync(backupDir, { recursive: true })
+        const safeLabel = String(label).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 16) || 'manual'
+        const suffix = randomBytes(2).toString('hex')
+        const filename = `gateway-backup-${formatBackupStamp(Date.now())}-${safeLabel}-${suffix}.sqlite`
+        const fullPath = join(backupDir, filename)
+        db.prepare('VACUUM INTO ?').run(fullPath)
+        try {
+          chmodSync(fullPath, 0o600)
+        } catch {
+          // Ignore chmod error on platforms without POSIX permissions
+        }
+        const entries = readdirSync(backupDir)
+          .filter((name) => BACKUP_FILE_RE.test(name))
+          .map((name) => {
+            const st = statSync(join(backupDir, name))
+            return { filename: name, sizeBytes: st.size, mtimeMs: st.mtimeMs, createdAt: new Date(st.mtimeMs).toISOString() }
+          })
+          .sort((a, b) => b.mtimeMs - a.mtimeMs || b.filename.localeCompare(a.filename))
+        const keep = Math.max(1, Number(retentionCount) || 14)
+        for (const stale of entries.slice(keep)) {
+          try {
+            rmSync(join(backupDir, stale.filename), { force: true })
+          } catch {
+            // Best-effort rotation
+          }
+        }
+        const current = entries.find((item) => item.filename === filename)
+          ?? { filename, sizeBytes: statSync(fullPath).size, createdAt: nowIso() }
+        return { filename: current.filename, sizeBytes: current.sizeBytes, createdAt: current.createdAt }
+      },
+      listBackups(backupDir) {
+        if (!backupDir) return []
+        let names = []
+        try {
+          names = readdirSync(backupDir)
+        } catch {
+          return []
+        }
+        return names
+          .filter((name) => BACKUP_FILE_RE.test(name))
+          .map((name) => {
+            const st = statSync(join(backupDir, name))
+            return { filename: name, sizeBytes: st.size, mtimeMs: st.mtimeMs, createdAt: new Date(st.mtimeMs).toISOString() }
+          })
+          .sort((a, b) => b.mtimeMs - a.mtimeMs || b.filename.localeCompare(a.filename))
+          .map(({ filename, sizeBytes, createdAt }) => ({ filename, sizeBytes, createdAt }))
       },
       listUserKeys(userId) {
         recoverBeforeRead()

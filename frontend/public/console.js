@@ -1,5 +1,6 @@
 import {
   appendRequestPage,
+  buildRequestFilterParams,
   dismissSplash,
   escapeHtml,
   formatInteger,
@@ -10,11 +11,13 @@ import {
   formatVnDateTime,
   getKeyStatusMeta,
   getRequestStatusMeta,
+  getTransactionTypeMeta,
   initSplashGuard,
   isChargeCappedByReservation,
   isoUtcToVnInput,
   mergeRequestPages,
   parseUsdToMicros,
+  renderDailySpendChartSvg,
   renderNullableValue,
   translateApiError,
   vnInputToIsoUtc,
@@ -80,17 +83,53 @@ const dom = {
   disableModalMessage: document.getElementById('disable-modal-message'),
   disableCancelBtn: document.getElementById('disable-cancel-btn'),
   disableConfirmBtn: document.getElementById('disable-confirm-btn'),
+  openPasswordBtn: document.getElementById('open-password-btn'),
+  passwordModal: document.getElementById('password-modal'),
+  passwordModalForm: document.getElementById('password-modal-form'),
+  passwordModalCloseX: document.getElementById('password-modal-close-x'),
+  passwordModalCancel: document.getElementById('password-modal-cancel'),
+  passwordModalSubmit: document.getElementById('password-modal-submit'),
+  passwordModalError: document.getElementById('password-modal-error'),
+  pwCurrentInput: document.getElementById('pw-current-input'),
+  pwNewInput: document.getElementById('pw-new-input'),
+  pwConfirmInput: document.getElementById('pw-confirm-input'),
+  redeemForm: document.getElementById('redeem-form'),
+  redeemCodeInput: document.getElementById('redeem-code-input'),
+  redeemSubmitBtn: document.getElementById('redeem-submit-btn'),
+  anToday: document.getElementById('an-today'),
+  anPeriod: document.getElementById('an-period'),
+  anSaved: document.getElementById('an-saved'),
+  anRequests: document.getElementById('an-requests'),
+  consoleChartBox: document.getElementById('console-chart-box'),
+  consoleTopModelsWrap: document.getElementById('console-top-models-wrap'),
+  consoleTopModelsTbody: document.getElementById('console-top-models-tbody'),
+  txCount: document.getElementById('tx-count'),
+  txEmpty: document.getElementById('tx-empty'),
+  txTableWrap: document.getElementById('tx-table-wrap'),
+  txTbody: document.getElementById('tx-tbody'),
+  detailExportCsvBtn: document.getElementById('detail-export-csv-btn'),
+  detailFilterForm: document.getElementById('detail-filter-form'),
+  detailFromDate: document.getElementById('detail-from-date'),
+  detailToDate: document.getElementById('detail-to-date'),
+  detailModelFilter: document.getElementById('detail-model-filter'),
+  detailStatusFilter: document.getElementById('detail-status-filter'),
+  detailFilterReset: document.getElementById('detail-filter-reset'),
 };
 
 const state = {
   user: null,
   keys: [],
   models: [],
+  analytics: null,
+  analyticsDays: 14,
+  transactions: [],
+  transactionsTotal: 0,
   selectedKey: null,
   history: [],
   historyTotal: 0,
   nextCursor: null,
   loadingMore: false,
+  filters: { fromDate: '', toDate: '', model: 'all', status: 'all' },
   modalMode: 'create',
   editingKey: null,
   pendingDisableKey: null,
@@ -184,6 +223,93 @@ function renderModels() {
       },
     )
     .join('');
+
+  if (dom.detailModelFilter) {
+    const prev = dom.detailModelFilter.value || 'all';
+    dom.detailModelFilter.innerHTML = [
+      '<option value="all">Tất cả model</option>',
+      ...state.models.map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.id)}</option>`),
+    ].join('');
+    if ([...dom.detailModelFilter.options].some((opt) => opt.value === prev)) {
+      dom.detailModelFilter.value = prev;
+    }
+  }
+}
+
+function renderAnalytics() {
+  const data = state.analytics;
+  if (!data || !dom.consoleChartBox) return;
+  const s = data.summary ?? {};
+  if (dom.anToday) dom.anToday.textContent = formatMicrosToUsd(s.todaySpentMicros ?? 0) ?? '$0.00';
+  if (dom.anPeriod) dom.anPeriod.textContent = formatMicrosToUsd(s.periodSpentMicros ?? 0) ?? '$0.00';
+  if (dom.anSaved) dom.anSaved.textContent = formatMicrosToUsd(s.periodSavedMicros ?? 0) ?? '$0.00';
+  if (dom.anRequests) dom.anRequests.textContent = formatInteger(s.totalRequests ?? 0) ?? '0';
+  dom.consoleChartBox.innerHTML = renderDailySpendChartSvg(data.daily);
+
+  const topModels = Array.isArray(data.topModels) ? data.topModels : [];
+  if (topModels.length === 0) {
+    dom.consoleTopModelsWrap?.classList.add('hidden');
+    if (dom.consoleTopModelsTbody) dom.consoleTopModelsTbody.innerHTML = '';
+  } else {
+    dom.consoleTopModelsWrap?.classList.remove('hidden');
+    if (dom.consoleTopModelsTbody) {
+      dom.consoleTopModelsTbody.innerHTML = topModels
+        .map(
+          (m) => `
+        <tr>
+          <td class="mono"><strong>${escapeHtml(m.model)}</strong></td>
+          <td class="num">${escapeHtml(formatInteger(m.requests))}</td>
+          <td class="num">${escapeHtml(formatInteger(m.inputTokens))} / <span style="color:#059669">${escapeHtml(formatInteger(m.cachedTokens))}</span> / ${escapeHtml(formatInteger(m.outputTokens))}</td>
+          <td class="num" style="color:#7c3aed; font-weight:700">${escapeHtml(formatMicrosToUsd(m.savedMicros) ?? '$0.00')}</td>
+          <td class="num"><strong>${escapeHtml(formatMicrosToUsd(m.spentMicros) ?? '$0.00')}</strong></td>
+        </tr>
+      `,
+        )
+        .join('');
+    }
+  }
+}
+
+function renderTransactions() {
+  if (!dom.txTbody) return;
+  const total = Math.max(state.transactions.length, state.transactionsTotal);
+  if (dom.txCount) dom.txCount.textContent = `${formatInteger(total) ?? '0'} giao dịch`;
+  if (state.transactions.length === 0) {
+    dom.txEmpty?.classList.remove('hidden');
+    dom.txTableWrap?.classList.add('hidden');
+    dom.txTbody.innerHTML = '';
+    return;
+  }
+  dom.txEmpty?.classList.add('hidden');
+  dom.txTableWrap?.classList.remove('hidden');
+  dom.txTbody.innerHTML = state.transactions
+    .map((tx) => {
+      const meta = getTransactionTypeMeta(tx.type);
+      const pos = tx.deltaMicros >= 0;
+      const sign = pos ? '+' : '';
+      return `
+      <tr>
+        <td class="num">${renderNullableValue(formatVnDateTime(tx.createdAt))}</td>
+        <td><span class="badge badge-${meta.tone}">${escapeHtml(meta.label)}</span></td>
+        <td class="num"><span class="${pos ? 'tx-delta-pos' : 'tx-delta-neg'}">${escapeHtml(sign + (formatMicrosToUsd(tx.deltaMicros) ?? '$0.00'))}</span></td>
+        <td class="num"><strong>${escapeHtml(formatMicrosToUsd(tx.balanceAfterMicros) ?? '$0.00')}</strong></td>
+        <td>
+          <div>${escapeHtml(tx.note ?? '—')}</div>
+          ${tx.refCode ? `<span class="sub-line mono">Mã: ${escapeHtml(tx.refCode)}</span>` : ''}
+        </td>
+      </tr>
+    `;
+    })
+    .join('');
+}
+
+function hasActiveHistoryFilter() {
+  return Boolean(
+    state.filters.fromDate
+    || state.filters.toDate
+    || (state.filters.model && state.filters.model !== 'all')
+    || (state.filters.status && state.filters.status !== 'all'),
+  );
 }
 
 function renderKeyModelsCell(models) {
@@ -264,7 +390,9 @@ function renderHistory() {
   dom.detailSection.classList.remove('hidden');
   dom.detailHeading.textContent = `Lịch sử khóa: ${state.selectedKey.name}`;
   dom.detailPrefix.textContent = `${state.selectedKey.keyPrefix}•••`;
-  const total = Math.max(state.history.length, state.historyTotal, Number(state.selectedKey.requestCount ?? 0));
+  const total = hasActiveHistoryFilter()
+    ? Math.max(state.history.length, state.historyTotal)
+    : Math.max(state.history.length, state.historyTotal, Number(state.selectedKey.requestCount ?? 0));
   dom.detailHistoryCount.textContent = formatLoadedCount(state.history.length, total);
 
   if (state.history.length === 0) {
@@ -337,15 +465,16 @@ function updateLiveToggleUi() {
 
 async function silentPollConsole() {
   if (!state.liveEnabled || state.pollInFlight || document.hidden) return;
-  if (dom.keyModal.open || dom.revealModal.open || dom.disableModal.open) return;
+  if (dom.keyModal.open || dom.revealModal.open || dom.disableModal.open || dom.passwordModal?.open) return;
   state.pollInFlight = true;
   try {
     const selectedId = state.selectedKey?.id ?? null;
     const pollHistory = Boolean(selectedId) && !state.loadingMore;
+    const histQuery = buildRequestFilterParams({ limit: PAGE_LIMIT, ...state.filters });
     const [keysData, latestPage] = await Promise.all([
       apiFetch('/api/console/keys'),
       pollHistory
-        ? apiFetch(`/api/console/keys/${encodeURIComponent(selectedId)}/requests?limit=${PAGE_LIMIT}`)
+        ? apiFetch(`/api/console/keys/${encodeURIComponent(selectedId)}/requests?${histQuery}`)
         : Promise.resolve(null),
     ]);
     state.user = keysData.user;
@@ -397,19 +526,39 @@ function startConsoleLivePolling() {
   state.pollTimer = setInterval(silentPollConsole, LIVE_INTERVAL_MS);
 }
 
+async function loadAnalytics(days = state.analyticsDays) {
+  state.analyticsDays = days;
+  document.querySelectorAll('.days-pill[data-console-days]').forEach((btn) => {
+    btn.classList.toggle('active', Number(btn.dataset.consoleDays) === days);
+  });
+  try {
+    state.analytics = await apiFetch(`/api/console/analytics?days=${encodeURIComponent(days)}`);
+    renderAnalytics();
+  } catch {
+    // Non-fatal
+  }
+}
+
 async function loadAll() {
-  const [keysData, modelsData] = await Promise.all([
+  const [keysData, modelsData, analyticsData, txData] = await Promise.all([
     apiFetch('/api/console/keys'),
     apiFetch('/api/public/models'),
+    apiFetch(`/api/console/analytics?days=${encodeURIComponent(state.analyticsDays)}`).catch(() => null),
+    apiFetch('/api/console/transactions?limit=50').catch(() => ({ items: [], total: 0 })),
   ]);
   state.user = keysData.user;
   state.keys = Array.isArray(keysData.items) ? keysData.items : [];
   state.models = Array.isArray(modelsData.items) ? modelsData.items : [];
+  if (analyticsData) state.analytics = analyticsData;
+  state.transactions = Array.isArray(txData?.items) ? txData.items : [];
+  state.transactionsTotal = Number.isSafeInteger(txData?.total) ? txData.total : state.transactions.length;
   if (state.selectedKey) {
     state.selectedKey = state.keys.find((k) => k.id === state.selectedKey.id) ?? null;
   }
   renderAccount();
   renderModels();
+  renderAnalytics();
+  renderTransactions();
   renderKeys();
   dom.loading.classList.add('hidden');
   dom.body.classList.remove('hidden');
@@ -425,7 +574,8 @@ async function loadAll() {
 async function openHistory(key) {
   state.selectedKey = key;
   renderKeys();
-  const page = await apiFetch(`/api/console/keys/${encodeURIComponent(key.id)}/requests?limit=${PAGE_LIMIT}`);
+  const qs = buildRequestFilterParams({ limit: PAGE_LIMIT, ...state.filters });
+  const page = await apiFetch(`/api/console/keys/${encodeURIComponent(key.id)}/requests?${qs}`);
   if (state.selectedKey?.id !== key.id) return;
   state.history = Array.isArray(page.items) ? page.items : [];
   state.historyTotal = Number.isSafeInteger(page.total) ? page.total : state.history.length;
@@ -440,8 +590,9 @@ async function loadMoreHistory() {
   state.loadingMore = true;
   renderHistory();
   try {
+    const qs = buildRequestFilterParams({ limit: PAGE_LIMIT, before: cursor, ...state.filters });
     const page = await apiFetch(
-      `/api/console/keys/${encodeURIComponent(keyId)}/requests?limit=${PAGE_LIMIT}&before=${encodeURIComponent(cursor)}`,
+      `/api/console/keys/${encodeURIComponent(keyId)}/requests?${qs}`,
     );
     if (state.selectedKey?.id !== keyId) return;
     state.history = appendRequestPage(state.history, page.items ?? []);
@@ -726,6 +877,130 @@ if (dom.liveToggleBtn) {
     state.liveEnabled = !state.liveEnabled;
     updateLiveToggleUi();
     if (state.liveEnabled) silentPollConsole();
+  });
+}
+
+document.querySelectorAll('.days-pill[data-console-days]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const days = Number(btn.dataset.consoleDays) || 14;
+    loadAnalytics(days);
+  });
+});
+
+if (dom.redeemForm) {
+  dom.redeemForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const code = dom.redeemCodeInput.value.trim();
+    if (!code) {
+      setFeedback('Vui lòng nhập mã Giftcode trước khi áp dụng.', 'warning');
+      dom.redeemCodeInput.focus();
+      return;
+    }
+    dom.redeemSubmitBtn.disabled = true;
+    try {
+      const res = await apiFetch('/api/console/redeem', { method: 'POST', body: { code } });
+      dom.redeemCodeInput.value = '';
+      const addedUsd = formatMicrosToUsd(res.giftcode?.amountMicros ?? 0);
+      setFeedback(`Đã nạp thành công ${addedUsd} từ mã ${res.giftcode?.code ?? code} vào ví của bạn!`, 'success');
+      await loadAll();
+    } catch (error) {
+      if (!error?.redirected) setFeedback(error.message ?? 'Không thể áp dụng mã Giftcode.', 'danger');
+    } finally {
+      dom.redeemSubmitBtn.disabled = false;
+    }
+  });
+}
+
+function showPasswordError(msg) {
+  if (!dom.passwordModalError) return;
+  if (!msg) {
+    dom.passwordModalError.classList.add('hidden');
+    dom.passwordModalError.textContent = '';
+    return;
+  }
+  dom.passwordModalError.textContent = msg;
+  dom.passwordModalError.classList.remove('hidden');
+}
+
+if (dom.openPasswordBtn && dom.passwordModal) {
+  dom.openPasswordBtn.addEventListener('click', () => {
+    dom.pwCurrentInput.value = '';
+    dom.pwNewInput.value = '';
+    dom.pwConfirmInput.value = '';
+    showPasswordError('');
+    dom.passwordModal.showModal();
+    dom.pwCurrentInput.focus();
+  });
+  dom.passwordModalCancel.addEventListener('click', () => dom.passwordModal.close());
+  dom.passwordModalCloseX.addEventListener('click', () => dom.passwordModal.close());
+  dom.passwordModalForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    showPasswordError('');
+    const currentPassword = dom.pwCurrentInput.value;
+    const newPassword = dom.pwNewInput.value;
+    const confirmPassword = dom.pwConfirmInput.value;
+    if (!currentPassword) {
+      showPasswordError('Vui lòng nhập mật khẩu hiện tại.');
+      return;
+    }
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      showPasswordError('Mật khẩu mới phải dài từ 8 đến 128 ký tự.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showPasswordError('Mật khẩu xác nhận không khớp với mật khẩu mới.');
+      return;
+    }
+    dom.passwordModalSubmit.disabled = true;
+    try {
+      await apiFetch('/api/auth/change-password', {
+        method: 'POST',
+        body: { currentPassword, newPassword },
+      });
+      dom.passwordModal.close();
+      setFeedback('Đã đổi mật khẩu thành công. Các phiên đăng nhập ở thiết bị khác đã bị đăng xuất.', 'success');
+    } catch (error) {
+      if (!error?.redirected) showPasswordError(error.message ?? 'Không thể đổi mật khẩu.');
+    } finally {
+      dom.passwordModalSubmit.disabled = false;
+    }
+  });
+}
+
+if (dom.detailFilterForm) {
+  dom.detailFilterForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    state.filters = {
+      fromDate: dom.detailFromDate?.value ?? '',
+      toDate: dom.detailToDate?.value ?? '',
+      model: dom.detailModelFilter?.value ?? 'all',
+      status: dom.detailStatusFilter?.value ?? 'all',
+    };
+    if (state.selectedKey) {
+      openHistory(state.selectedKey).catch((err) => {
+        if (!err?.redirected) setFeedback(err.message ?? 'Không thể lọc lịch sử.', 'danger');
+      });
+    }
+  });
+}
+
+if (dom.detailFilterReset) {
+  dom.detailFilterReset.addEventListener('click', () => {
+    if (dom.detailFromDate) dom.detailFromDate.value = '';
+    if (dom.detailToDate) dom.detailToDate.value = '';
+    if (dom.detailModelFilter) dom.detailModelFilter.value = 'all';
+    if (dom.detailStatusFilter) dom.detailStatusFilter.value = 'all';
+    state.filters = { fromDate: '', toDate: '', model: 'all', status: 'all' };
+    if (state.selectedKey) openHistory(state.selectedKey).catch(() => {});
+  });
+}
+
+if (dom.detailExportCsvBtn) {
+  dom.detailExportCsvBtn.addEventListener('click', () => {
+    if (!state.selectedKey) return;
+    const qs = buildRequestFilterParams(state.filters);
+    const url = `/api/console/keys/${encodeURIComponent(state.selectedKey.id)}/requests.csv${qs ? `?${qs}` : ''}`;
+    window.location.href = url;
   });
 }
 

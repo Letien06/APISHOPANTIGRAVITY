@@ -6,7 +6,7 @@
     <meta name="referrer" content="no-referrer" />
     <title>Console quản lý khóa — TienCoder API</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg?v=2" />
-    <link rel="stylesheet" href="/assets/passport.css?v=5" />
+    <link rel="stylesheet" href="/assets/passport.css?v=6" />
   </head>
   <body>
     <div id="tc-splash" class="tc-splash" role="status" aria-live="polite" aria-label="Đang tải Console TienCoder API">
@@ -53,6 +53,7 @@
         <div class="nav-right">
           <span class="badge badge-neutral desktop-only">Giờ Việt Nam (UTC+7)</span>
           <span id="header-user-badge" class="badge badge-success mono hidden"></span>
+          <button id="open-password-btn" type="button" class="btn btn-outline btn-sm">Đổi mật khẩu</button>
           <button id="logout-btn" type="button" class="btn btn-danger-outline btn-sm">Đăng xuất</button>
         </div>
       </div>
@@ -102,6 +103,70 @@
               <div class="kpi-label">Số dư còn lại</div>
               <div class="kpi-value" id="acc-remaining">$0.00</div>
             </div>
+          </div>
+
+          <form id="redeem-form" class="redeem-bar" autocomplete="off" novalidate>
+            <strong style="font-size: 0.88rem; color: #065f46">🎁 Nạp ví bằng mã Giftcode:</strong>
+            <input
+              id="redeem-code-input"
+              class="text-input"
+              type="text"
+              maxlength="40"
+              placeholder="Nhập mã ví dụ: TC-ABCD-1234"
+              aria-label="Mã nạp Giftcode"
+            />
+            <button id="redeem-submit-btn" type="submit" class="btn btn-mint btn-sm">Áp dụng mã</button>
+          </form>
+        </section>
+
+        <!-- Spending Analytics & Cache Savings -->
+        <section class="passport-card card-pad section-gap" aria-labelledby="console-analytics-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="console-analytics-heading">Thống kê chi tiêu &amp; Tiết kiệm Prompt Cache</h2>
+              <span class="sub-line">Tổng hợp theo ngày (Giờ Việt Nam — UTC+7) trên toàn bộ khóa của tài khoản</span>
+            </div>
+            <div class="days-pills" role="group" aria-label="Khoảng thời gian thống kê">
+              <button type="button" class="days-pill" data-console-days="7">7 ngày</button>
+              <button type="button" class="days-pill active" data-console-days="14">14 ngày</button>
+              <button type="button" class="days-pill" data-console-days="30">30 ngày</button>
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Chi tiêu hôm nay</div>
+              <div class="kpi-value" id="an-today">$0.00</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Chi tiêu trong kỳ</div>
+              <div class="kpi-value" id="an-period">$0.00</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Tiết kiệm nhờ Cache (-75%)</div>
+              <div class="kpi-value" id="an-saved" style="color: #7c3aed">$0.00</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Lượt gọi trong kỳ</div>
+              <div class="kpi-value" id="an-requests">0</div>
+            </div>
+          </div>
+
+          <div id="console-chart-box" class="analytics-chart-box"></div>
+
+          <div id="console-top-models-wrap" class="table-scroll hidden" style="margin-top: 14px">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Top Model sử dụng</th>
+                  <th scope="col">Request</th>
+                  <th scope="col">Token (Vào / Cache / Ra)</th>
+                  <th scope="col">Tiết kiệm Cache</th>
+                  <th scope="col">Tổng chi tiêu</th>
+                </tr>
+              </thead>
+              <tbody id="console-top-models-tbody"></tbody>
+            </table>
           </div>
         </section>
 
@@ -156,9 +221,42 @@
             </div>
             <div class="toolbar-actions">
               <span id="detail-history-count" class="badge badge-neutral">0 mục</span>
+              <button id="detail-export-csv-btn" type="button" class="btn btn-outline btn-sm">Xuất CSV</button>
               <button id="detail-close-btn" type="button" class="btn btn-outline btn-sm">Đóng</button>
             </div>
           </div>
+
+          <form id="detail-filter-form" class="history-filter-bar" autocomplete="off">
+            <div class="filter-field">
+              <label for="detail-from-date">Từ ngày (UTC+7)</label>
+              <input id="detail-from-date" class="text-input" type="date" />
+            </div>
+            <div class="filter-field">
+              <label for="detail-to-date">Đến ngày (UTC+7)</label>
+              <input id="detail-to-date" class="text-input" type="date" />
+            </div>
+            <div class="filter-field">
+              <label for="detail-model-filter">Model</label>
+              <select id="detail-model-filter" class="text-input">
+                <option value="all">Tất cả model</option>
+              </select>
+            </div>
+            <div class="filter-field">
+              <label for="detail-status-filter">Trạng thái</label>
+              <select id="detail-status-filter" class="text-input">
+                <option value="all">Tất cả trạng thái</option>
+                <option value="success">Thành công</option>
+                <option value="upstream_error">Lỗi upstream</option>
+                <option value="transport_error">Lỗi kết nối</option>
+                <option value="usage_missing">Thiếu usage</option>
+                <option value="pending">Đang xử lý</option>
+              </select>
+            </div>
+            <div class="filter-actions">
+              <button type="submit" class="btn btn-dark btn-sm">Lọc</button>
+              <button id="detail-filter-reset" type="button" class="btn btn-outline btn-sm">Xóa lọc</button>
+            </div>
+          </form>
 
           <div id="detail-empty" class="empty-state hidden">
             <p>Khóa này chưa có lượt gọi nào.</p>
@@ -182,6 +280,34 @@
 
           <div id="detail-load-more-wrap" class="load-more-wrap hidden">
             <button id="detail-load-more-btn" type="button" class="btn btn-outline btn-sm">Tải thêm</button>
+          </div>
+        </section>
+
+        <!-- Wallet Transactions Ledger -->
+        <section class="passport-card card-pad section-gap" aria-labelledby="tx-heading">
+          <div class="toolbar">
+            <div>
+              <h2 id="tx-heading">Lịch sử nạp ví &amp; biến động hạn mức</h2>
+              <span class="sub-line">Ghi nhận mọi lần cộng tiền Giftcode, quà khởi tạo và điều chỉnh từ quản trị viên</span>
+            </div>
+            <span id="tx-count" class="badge badge-neutral">0 giao dịch</span>
+          </div>
+          <div id="tx-empty" class="empty-state hidden">
+            <p>Chưa có giao dịch nạp hoặc điều chỉnh hạn mức nào.</p>
+          </div>
+          <div id="tx-table-wrap" class="table-scroll hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Thời điểm (UTC+7)</th>
+                  <th scope="col">Loại giao dịch</th>
+                  <th scope="col">Biến động</th>
+                  <th scope="col">Hạn mức sau giao dịch</th>
+                  <th scope="col">Ghi chú / Mã</th>
+                </tr>
+              </thead>
+              <tbody id="tx-tbody"></tbody>
+            </table>
           </div>
         </section>
 
@@ -298,6 +424,36 @@
       </div>
     </dialog>
 
-    <script type="module" src="/assets/console.js?v=5"></script>
+    <!-- Change Password Modal -->
+    <dialog id="password-modal" class="modal" aria-labelledby="password-modal-title">
+      <form id="password-modal-form" novalidate>
+        <div class="modal-header">
+          <h3 id="password-modal-title">Đổi mật khẩu tài khoản</h3>
+          <button type="button" class="btn btn-outline btn-sm" id="password-modal-close-x">Đóng</button>
+        </div>
+        <div class="modal-body">
+          <div id="password-modal-error" class="alert alert-danger hidden" role="alert"></div>
+          <div class="field">
+            <label class="field-label" for="pw-current-input">Mật khẩu hiện tại</label>
+            <input id="pw-current-input" class="text-input" type="password" autocomplete="current-password" required />
+          </div>
+          <div class="field">
+            <label class="field-label" for="pw-new-input">Mật khẩu mới (8–128 ký tự)</label>
+            <input id="pw-new-input" class="text-input" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
+          </div>
+          <div class="field">
+            <label class="field-label" for="pw-confirm-input">Nhập lại mật khẩu mới</label>
+            <input id="pw-confirm-input" class="text-input" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
+          </div>
+          <p class="field-hint">Sau khi đổi mật khẩu, tất cả phiên đăng nhập ở các thiết bị khác sẽ tự động bị đăng xuất để bảo vệ tài khoản.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline btn-sm" id="password-modal-cancel">Hủy</button>
+          <button type="submit" class="btn btn-dark btn-sm" id="password-modal-submit">Cập nhật mật khẩu</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="/assets/console.js?v=6"></script>
   </body>
 </html>
